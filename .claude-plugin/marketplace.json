@@ -7,7 +7,7 @@
         {
             "name": "git-commits",
             "source": "./plugins/git-commits",
-            "description": "A plugin to get the git commits for a given repository."
+            "description": "A simple hello world plugin demonstrating Claude Code skill creation"
         }
     ]
 }
