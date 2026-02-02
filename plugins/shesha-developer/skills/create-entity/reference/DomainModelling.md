@@ -1,0 +1,198 @@
+# Domain Modelling Guidelines
+
+The domain model design should adhere to the Shesha best-practices and guideline outlined below.
+
+## Solution Structure
+- All domain related classes should be placed under the Domain folder and organized into appropriate namespaces and folders to reflect their purpose and usage within the application.
+- Only classes and enums that are shared accross a number of different entities and purposes should be placed directly in the Domain folder.
+- All enums, value objects and JSONEntities specific to an entity should be placed within the same namespace as the entity.
+- All child entities belonging to an aggregate should be placed within the same namespace as the aggregate root.
+
+## Shesha Domain Modelling Best Practices and Guidelines
+
+### Reuse Existing Framework Capabilities
+The Shesha framework already contains rich capabilities for audit logging and role based access control (RBAC) which should be leveraged when considering the design of a new domain instead of reinventing the wheel. Any proposed system design should therefore seek to leverage the following capabilities rather than including additional entities for the purposes:
+
+#### Role and Permission Based Access Control
+The following entities are provided by the Shesha framework to enforce define Role and Permission Based Access Control and should not be duplicated in any domain designs.
+| Entity Name | Description |
+| -------------- |
+| `ShaRole` | Defines a system role. |
+| `ShaPermission` | Defines a permission. |
+| `ShaRolePermission` | Species which permissions are associated with which Role. |
+| `ShaRoleAppointedPerson` | Species which Roles are appointed to which Person or User. |
+
+Since the Shesha framework already supports role based security and access control you should not model any additional entities to support this.
+
+### Reuse Existing Entities
+The Shesha framework provides various standard entities around which important functionality is already built. When designing a domain model you should see if these entities and capabilities may be reused and extended rather than duplicating them.
+ 
+#### Shesha.Core Entities
+The base `Shesha.Core` domain model includes the following entities that may be reused and extended:
+
+| Entity Name | Description |
+| ----------- |------------ |
+| `Account` | Represents a customer account, whether on behalf of a person or organisation.  |
+| `Address` | Represents an address. |                                          |
+| `Organisation` | Represents an organizational unit, organisation/company, team or similar.|
+| `Person` | Represents a person in the application such as employee, customer, contact, etc... A Person is not necessarily a system user as this will depend on wether there is a corresponding `User` for Person. |
+| `Note` | Represents a user note or comment. A list of notes may be associated with any parent entity. |
+| `ReferenceList` and `ReferenceListItem` | Represents a standard list of values. |
+| `Site` | Represents a geographic location or physical structure such as location, area, buildings, room etc... |
+| `StoredFile` | Represents a file stored in the system. |
+
+##### Extending the Person Entity
+If the Shesha application or module is intended to be built for reuse by other developers, it is often preferable not to extend the `Person` entity by sub-classing it to include role-specific properties. Instead, a separate Profile entity referencing the `Person` entity should be created, where the profile entity would include the relevant properties.
+In the example below, it shows how we create a leave-management-profile entity with relevant properties rather than creating a person with leave subclass. So as not to limit the further extensibility of the person entity.The example is presented.
+
+```
+Public class LeaveProfile
+{
+    Public Person PartOf { get; set; }
+    Public int AvailableLeaveDays { get; set; }
+}
+```
+#### Reusing entities from other modules
+To avoid duplicating in your design, entities which may already be provided for in other modules already included in the solution you are intended to help design. If the user has not indicated the modules that the solution requires, do ask and clarify whether any other modules are included that should be considered incorporated into the design.
+If modules are specified, do encourage the user to upload the domain model of those modules, so that you do not duplicate any such entity or other reference.
+
+### Choosing the Right Base Class for new Entities
+Any new entities that need to be defined ultimately need to inherit from `Entity<TId>` where Tid is the type of the Id property and should be `Guid` by default.
+- You may however also inherit from other pre-existing sub-classes of `Entity` depending of the level of auditing required:
+ - Entities that do not generally get updated after the initial creation should inherit from `CreationAuditedEntity<TId>`.
+ - Entities that may get updated but not deleted should inherit from `AuditedEntity<TId>` as it will track modification timestamp and user
+ - Most entities should inherit from `FullAuditedEntity<TId>` which will track creation, update and deletion users and timestamps.
+
+### Entity Class Attributes
+
+The Following class level attributes should be added to entity classes where relevant. 
+
+| **Attribute** | **Description**  |
+| --- | --- |
+| `[Audited]` | Add to any entity class to enable auditing. When applied at the class level, all properties on the entity will be audited, meaning that any changes to their values will be logged. |
+| `[Discriminator]` | Add to any entity that you expect to inherit from so that a Discriminator column can be added at the database layer. By default, Shesha uses a 'Table per Hierarchy' inheritance strategy. This means that all entity subclasses will be stored in the same table as the base class, and a discriminator column will be used to identify the type of entity being stored. |
+| `[DiscriminatorValue("DiscriminatorName")]` | Add this attribute to entities that inherit from another entity class and where you want to explicitly specify your own discriminator value. If ommitted, Shesha will use the entity class's namespace and name, e.g., `MyOrg.MyApp.` |
+| `[Entity]` | Provides parameters to add additional metadata to the entity and control additional aspects of the behavior of the entity: <br/> **`GenerateApplicationService`** - Specifies whether CRUD APIs for this entity should be generated. <br/> **`ApplicationServiceName`** - The name of the application service to be generated for the entity. This will be reflected in the URL of the dynamically generated CRUD API. If not specified, the name of the entity will be used. See also [CRUD APIs](/docs/back-end-basics/crud-apis). <br/> **`FriendlyName`** - A more user-friendly name for the entity to be used in the UI. If not specified, the name of the entity will be used. <br/> |
+| `[Table("TableName")]` | Add this attribute if the Database table the entity maps to deviates from standard naming conventions. |
+| `[AddToMetadata]` | This attribute can mainly be used to forcibly add a DTO that has not been utilized on any service in the application to the list of models available to be used on the frontend. |
+
+### Entity Class Property Attributes
+The following property level attributes should be added to entity class properties where relevant. 
+
+| **Attribute** | **Description** |
+| --- | --- |
+| `[Audited]` | Add this attribute to any property that you want to be audited. |
+| `[CascadeUpdateRules]` | Applies to properties that reference other entities to specify if updates and create actions should be cascaded to the referenced entity. |
+| `[Description("Description of Property name")]` | Description of Class/Property Name. |
+| `[Encrypt]` | Add to properties that should be persisted in the database as an encrypted string. |
+| `[EntityDisplayName]` | Specifies the property that represents the entity's display name to users. If not explicitly defined, the framework defaults to using a property named 'Name,' if it exists. |
+| `[InverseProperty("ColumnName")]` | Specifies the name of the DB column on the other side of a one-to-many relationship. Add this attribute on any property listing entities that reference it. For example, if you have a `Customer` entity with a collection of `Orders`, you would use this attribute on the `Orders` property to specify the `Customer` property on the `Order` entity, e.g., `[InverseProperty("CustomerId")]`. |
+| `[NotMapped]` | Identifies properties that Shesha should not attempt to map to the database for read or write purposes. Add this attribute for to calculated properties at the application level. |
+| `[ReadonlyProperty]` | Add this attribute to any properties that map to the database but should not be updated by the application layer such as calculated columns at the database level. |
+| `[ReferenceList("RefListName", optional moduleName)]` | Add this to `int` or `long` properties that are associated with a reference list. DO NOT add this attribute when the property returns an enum based reference list as it is redundant. |
+| `[Required]` | Add to properties that are mandatory. |
+| `[StringLength(maxLength)] / [StringLength(minLength, maxLength)]` | Used to specify a field length (in number of bytes required to store the string) that needs to be limited to a maximum length or both minimum and maximum lengths. Its default parameter is maxLength and is used by properties with the _string_ data type. |
+| `[SaveAsJson]` | Applies to properties that reference child objects and causes them to be saved in the database as a JSON string rather than as a regular entity. |
+
+### Child Entities
+Child entities belonging to an aggregate should:
+ - Be placed in the same namespace and folder location as its aggregate
+ - Should have a property called `PartOf` at the top of the class referencing its parent entity
+
+### Special Child Entities
+Because it is such a common requirement to allow attachments and notes to be associated with any entity, the Shesha framework supports this out of the box.
+As such it is NOT necessary to add `IList<StoredFile>` or `IList<Note>` or similar collections to any entity to indicate that attachments or notes may be added to a specific entity.
+
+### Sample Entity Class
+
+The sample below illustrates a typical entity class following the guidelines.
+
+<example>
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Linq;
+using Abp.Domain.Entities.Auditing;
+using Shesha.Domain;
+using Shesha.Domain.Attributes;
+
+namespace MyApp.AccountsPayable.Domain.PaymentBatches
+{
+    /// <summary>
+    /// A Payment made to a supplier belonging to a batch.
+    /// </summary>
+    [Discriminator]
+    public class Payment: FullAuditedEntity<Guid>
+    {
+        public virtual PaymentBatch PartOf { get; set }
+
+        public virtual Account Supplier { get; set; }
+
+        [Audited]
+        public virtual decimal Amount { get; set; }
+
+        [ReferenceList("PaymentServiceCategory")]
+        public virtual long? ServiceCategory { get; set; }
+
+        [Audited]
+        public virtual RefListPaymentStatus Status { get; set; }
+
+        [StringLength(2000)]
+        [Audited]
+        public virtual string Description { get; set; }
+
+        [EntityDisplayName]
+        [ReadonlyProperty]
+        [Description=“DB calculated property concatenating the Category and Description”]
+        public virtual string CategoryWithDescription { get; set; }
+
+    }
+}
+
+```
+</example>
+
+The example below demonstrates a standard entity class that adheres to our development guidelines, including the use of the GenerateApplicationService parameter on the Entity attribute (possible values: UseConfiguration, AlwaysGenerateApplicationService, DisableGenerateApplicationService) controlling where the CRUD operations are generated.
+
+<example>
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Linq;
+using Abp.Domain.Entities.Auditing;
+using Shesha.Domain;
+using Shesha.Domain.Attributes;
+
+namespace MyApp.AccountsPayable.Domain.PaymentBatches
+{
+    /// <summary>
+    /// A Payment made to a supplier belonging to a batch.
+    /// </summary>
+    [Discriminator]
+    [Entity( GenerateApplicationService = GenerateApplicationServiceState.AlwaysGenerateApplicationService), FriendlyName = "Payment Gate Way")]
+
+    public class PaymentGateway: FullAuditedEntity<Guid>
+    {
+
+    }
+}
+```
+
+</example>
+
+This allows developers to control whether an application service should always be generated, follow the default configuration, or be explicitly disabled.
+
+## Placement of Files
+- Aggregate roots should be placed within their own namespace and folder under the Domain folder.
+  - The name of the folder should should a pluralized version of the entity
+  - For example, the `Vehicle` entity in a solution where the root namespace is `MyOrg.MyApp` would be placed in the namespace `MyOrg.MyApp.Domain.Vehicles` and corresponding folder.
+- Child entities should be placed in the same namespace and folder as their parent entity.
+  - For example, if `Wheel` is a child entity of `Vehicle` in the previous example, it should also be placed under `MyOrg.MyApp.Domain.Vehicles`.
+- Reference List enums should be placed in the same folder as the entity that uses them.
+- Database migration classes should be placed in a folder named `Migrations` within the module that contains the entity.
