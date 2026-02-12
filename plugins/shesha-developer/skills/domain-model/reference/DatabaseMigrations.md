@@ -1,5 +1,15 @@
 # Database Migration Guidelines
 
+## Contents
+- [Creating Database Migrations](#creating-database-migrations)
+- [Domain to DB Object Naming Mappings](#domain-to-db-object-naming-mappings)
+- [Creating Tables](#creating-tables)
+- [Adding Discriminator Columns for Inheritance](#adding-discriminator-columns-for-inheritance)
+- [Adding Columns for GenericEntityReference](#adding-columns-for-genericentityreference)
+- [Adding Foreign Key Columns](#adding-foreign-key-columns)
+- [Altering Existing Tables](#altering-existing-tables)
+- [Custom SQL Queries](#custom-sql-queries)
+
 The Shesha framework persists its domain using NHibernate as its ORM. Whenever the domain is updated, the underlying database model also needs to be updated.
 
 Updating the database model is done through Database Migrations based on Fluent Migrator with Shesha-specific extensions.
@@ -52,13 +62,13 @@ When creating database migrations, use the following naming conventions to ensur
 
 **Entity to Table:**
 - New entity → Table name = [ModuleDBPrefix]_[PluralizedEntityName]
-- Inherited entity → No new table; map to base entity’s table
+- Inherited entity → No new table; map to base entity's table
 
 **Property to Column:**
 - Regular property → Column name = [PropertyName]
 - Foreign key property → Column name = [PropertyName]Id
 - Reference list property → Column name = [PropertyName]Lkp
-- TimeSpan property → Column name = [PropertyName]Ticks (Type: bigint) 
+- TimeSpan property → Column name = [PropertyName]Ticks (Type: bigint)
 - Property added to inherited entity → Column name = [ModuleDBPrefix]_[PropertyName]
 
 **Module DB Prefix:**
@@ -78,8 +88,8 @@ Create.Table("MyModule_MyEntities")
     .WithColumn("Name").AsString(200).Nullable()
     .WithColumn("Description").AsString(500).Nullable()
     .WithColumn("Amount").AsDecimal().Nullable()
-    .WithColumn("CategoryLkp").AsInt64().Nullable();  // Reference list property
-    .WithColumn("StartTimeTick").AsInt64().Nullable();  // Maps to a property called StartTime of type TimeSpan
+    .WithColumn("CategoryLkp").AsInt64().Nullable()   // Reference list property
+    .WithColumn("StartTimeTicks").AsInt64().Nullable();  // Maps to a property called StartTime of type TimeSpan
 ```
 
 </example>

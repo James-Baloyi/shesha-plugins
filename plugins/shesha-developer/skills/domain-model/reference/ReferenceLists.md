@@ -1,5 +1,14 @@
 # Reference Lists Implementation Guidelines
 
+## Contents
+
+- [Choosing between Code-based (enum) and Data-based Reference Lists](#choosing-between-code-based-enum-and-data-based-reference-lists)
+- [Implementing Code-based (enum) Reference Lists](#implementing-code-based-enum-reference-lists)
+- [Implementing Data-Based Reference Lists](#implementing-data-based-reference-lists)
+- [Data Migration Methods](#data-migration-methods)
+- [Multi-Value Reference Lists](#multi-value-reference-lists)
+- [Useful functions for working with Multi-value reference lists](#useful-functions-for-working-with-multi-value-reference-lists)
+
 A Reference List (sometimes referred to as Lookup values, or List of Values) refers to a standard list of values usually displayed to end-users as dropdown lists (e.g. **Titles**: Mr, Mrs, Miss, etc...; **Gender**: Male, Female; **Colour**: Red,Blue, etc...).
 
 If an Entity's property is expected to only accept a standard list of values, a Reference List should be used. 
@@ -69,7 +78,7 @@ This example shows how to define a data-based reference list for locations using
 
 ``` csharp
     [Migration(20250317111700)]
-    public class M20250317111700 : Migration
+    public class M20250317111700 : OneWayMigration
     {
         public override void Up()
         {
@@ -80,11 +89,6 @@ This example shows how to define a data-based reference list for locations using
                 .AddItem(1, "New York", 1, "Some description")
                 .AddItem(2, "London", 2, "Capital of England")
                 .AddItem(3, "Tokyo", 3, "Capital of Japan");
-        }
-
-        public override void Down()
-        {
-            this.Shesha().ReferenceListDelete("MyOrg.MyProject", "Locations");
         }
     }
 ```
