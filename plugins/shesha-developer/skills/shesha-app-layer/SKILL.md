@@ -72,6 +72,13 @@ Generate application layer artifacts for a Shesha/.NET/ABP/NHibernate applicatio
 
 ### Common patterns
 
+**File management — use framework capabilities, do NOT create custom endpoints:**
+- For single file properties on entities, use `StoredFile` with `[StoredFile]` attribute — upload/download handled by the framework's `StoredFileController`.
+- For file attachment lists, use the framework's Owner pattern (`StoredFile.Owner`) — no collection property needed on the entity.
+- To work with files in services, inject `IStoredFileService` — provides `CreateFileAsync`, `GetStreamAsync`, `GetAttachmentsAsync`, `DeleteAsync`, and more.
+- Do NOT create custom upload/download controllers, file storage logic, or file metadata entities.
+- See [services-and-dtos.md](services-and-dtos.md) § File Management for service-layer patterns.
+
 **Validation:**
 ```csharp
 var validationResults = new List<ValidationResult>();

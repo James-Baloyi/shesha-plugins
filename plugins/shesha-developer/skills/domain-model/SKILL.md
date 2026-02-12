@@ -16,7 +16,9 @@ description: Creates and modifies domain entities, reference lists, and database
 
 ## Key Rules
 
-**Framework-First**: Always leverage Shesha's built-in capabilities before implementing custom solutions. Use existing entities (`Person`, `Organisation`, `Account`, `Address`, etc.) and the framework's metadata-driven approach. Check manifests before creating new entities.
+**Framework-First**: Always leverage Shesha's built-in capabilities before implementing custom solutions. Use existing entities (`Person`, `Organisation`, `Account`, `Address`, `StoredFile`, etc.) and the framework's metadata-driven approach. Check manifests before creating new entities.
+
+**Use Framework File Management**: The Shesha framework provides built-in file management via `StoredFile`, `StoredFileVersion`, `IStoredFileService`, and `StoredFileController`. Do NOT create custom file entities, upload/download endpoints, or file storage logic. See [reference/DomainModelling.md](reference/DomainModelling.md) § File and Document Management for patterns and details.
 
 **MANDATORY: Database Migrations for Every Domain Change**
 Whenever making changes to domain model entity classes — whether creating new entities, adding/removing/renaming properties, changing relationships, or updating reference lists — you MUST ALWAYS create the corresponding database migration classes. No domain model change is complete without its migration.
@@ -131,6 +133,7 @@ Determine the type of change, then follow the appropriate path:
 
 ```
 - [ ] Check manifests for reusable entities and reference lists
+- [ ] For file/document properties, use StoredFile (direct property or Owner pattern) — do NOT create custom file entities
 - [ ] Create entity class with correct base class, attributes, and properties
 - [ ] Create enum-based reference lists if needed (no migration required for these)
 - [ ] Create data-based reference list migrations if needed
