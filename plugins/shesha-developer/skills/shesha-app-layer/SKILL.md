@@ -1,6 +1,6 @@
 ---
 name: shesha-app-layer
-description: Generates Shesha application layer code artifacts for .NET applications using ABP framework with NHibernate. Creates application services, DTOs, AutoMapper profiles, domain entities, modules, and scheduled jobs. Use when the user asks to create, scaffold, or update application services, entities, DTOs, jobs, or modules in a Shesha project.
+description: Generates Shesha application layer code artifacts for .NET applications using ABP framework with NHibernate. Creates application services, DTOs, AutoMapper profiles, domain entities, modules, and scheduled jobs. IMPORTANT — This skill MUST be invoked BEFORE any manual exploration or planning when the task involves creating or modifying Shesha application services, DTOs, or AutoMapper profiles. Use when the user asks to create, scaffold, implement, or update the application layer, application services, entities, DTOs, jobs, or modules in a Shesha project. Also use when the user references a PRD, specification, or API design for backend implementation.
 ---
 
 # Shesha Application Layer Code Generation

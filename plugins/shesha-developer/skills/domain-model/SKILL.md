@@ -1,6 +1,6 @@
 ---
 name: domain-model
-description: Creates and modifies domain entities, reference lists, and database migrations in Shesha framework .NET applications. Use when creating new entities, updating entity properties or relationships, managing reference lists (code-based and data-based), or generating FluentMigrator database migrations.
+description: Creates and modifies domain entities, reference lists, and database migrations in Shesha framework .NET applications. IMPORTANT — This skill MUST be invoked BEFORE any manual exploration or planning when the task involves creating, modifying, or implementing domain entities, entity properties, relationships, reference lists, or database migrations. Use when the user asks to create, scaffold, implement, or update the domain layer, domain model, entities, reference lists, or migrations in a Shesha project. Also use when implementing features from a PRD, specification, or API design that require new or modified entities or database schema changes.
 ---
 
 # Shesha Domain Model Manager
