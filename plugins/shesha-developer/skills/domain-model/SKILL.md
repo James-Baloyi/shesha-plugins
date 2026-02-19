@@ -16,7 +16,7 @@ description: Creates and modifies domain entities, reference lists, and database
 
 ## Key Rules
 
-**Framework-First**: Always leverage Shesha's built-in capabilities before implementing custom solutions. Use existing entities (`Person`, `Organisation`, `Account`, `Address`, `StoredFile`, etc.) and the framework's metadata-driven approach. Check manifests before creating new entities.
+**Framework-First**: Always leverage Shesha's built-in capabilities before implementing custom solutions. Use existing entities (`Person`, `Organisation`, `Account`, `Address`, `StoredFile`, `OtpAuditItem`, etc.) and the framework's metadata-driven approach. Check manifests before creating new entities.
 
 **Use Framework File Management**: The Shesha framework provides built-in file management via `StoredFile`, `StoredFileVersion`, `IStoredFileService`, and `StoredFileController`. Do NOT create custom file entities, upload/download endpoints, or file storage logic. See [reference/DomainModelling.md](reference/DomainModelling.md) § File and Document Management for patterns and details.
 
@@ -43,7 +43,7 @@ The `reference/manifests/` folder contains JSON manifest files documenting all a
 ### Loading and Using Manifests
 
 When creating new entities, first check the relevant manifests to:
-1. **Identify reusable entities** - Extend existing entities like `Person`, `Organisation`, `Account` instead of creating new ones
+1. **Identify reusable entities** - Extend existing entities like `Person`, `Organisation`, `Account`, `OtpAuditItem` instead of creating new ones
 2. **Find correct base classes** - Use appropriate base classes from Shesha.Core
 3. **Reference existing entities** - Link to existing entities in relationships
 4. **Reuse reference lists** - Use existing enums/reference lists where applicable
@@ -89,6 +89,7 @@ Each manifest file follows this structure:
 | Manifest | Purpose | Key Entities |
 |----------|---------|--------------|
 | `shesha-core-manifest.json` | Core Shesha entities | Person, Organisation, Account, Address, Site, Notification |
+| `shesha-otp-manifest.json` | OTP/2FA verification | OtpAuditItem, RefListOtpSendType, RefListOtpSendStatus |
 | `shesha-enterprise-domain-manifest.json` | Enterprise business entities | FinancialAccount, Order, Invoice, Product, Employee, Contract |
 | `shesha-crm-domain-manifest.json` | CRM domain entities | Contact, Lead, Opportunity, Campaign, Territory |
 | `boxfusion-service-management-manifest.json` | Service/Case management | Case, CaseInteraction, SlaPolicy, Article |
@@ -115,6 +116,26 @@ using Shesha.Domain.Enums;
 public class MyEntity : FullAuditedEntity<Guid>
 {
     public virtual RefListGender Gender { get; set; }
+}
+```
+
+**Example: Referencing OTP audit trail**
+```csharp
+// From shesha-otp-manifest.json, OtpAuditItem is in Shesha.Domain namespace
+using Shesha.Domain;
+using Shesha.Domain.Enums;
+
+public class ConsentApproval : FullAuditedEntity<Guid>
+{
+    /// <summary>
+    /// Link to the OTP verification used for consent approval
+    /// </summary>
+    public virtual OtpAuditItem OtpVerification { get; set; }
+
+    /// <summary>
+    /// Type of channel used for OTP delivery
+    /// </summary>
+    public virtual RefListOtpSendType VerificationChannel { get; set; }
 }
 ```
 
