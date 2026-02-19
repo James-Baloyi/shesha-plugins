@@ -74,6 +74,7 @@ If it exists, STOP and inform the user: "The route path `/dynamic/<route-path>` 
 Read `src/screens/index.tsx` and verify neither the screen name nor the route path is already registered. If duplicates exist, STOP and inform the user.
 
 ### 3. Bootstrap the Screens Infrastructure (First Time Only)
+REMEMBER: By default /dynamic/ expects to render a Shesha form, make sure you 'whitelist' the path to the custom screen so the user does not get a 404.
 
 If `src/screens/index.tsx` and `src/screens/interfaces.ts` do not yet exist, create them.
 
