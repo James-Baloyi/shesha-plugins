@@ -32,13 +32,12 @@ Generate notification artifacts for a Shesha/.NET/ABP/NHibernate application bas
 
 ```
 {Module}.Application/
-  Services/
-    Notifications/
-      I{Domain}NotificationSender.cs
-      {Domain}NotificationSender.cs
-      {Domain}NotificationModel.cs
-      Channels/
-        {ChannelName}ChannelSender.cs
+  Notifications/
+    I{Domain}NotificationSender.cs
+    {Domain}NotificationSender.cs
+    {Domain}NotificationModel.cs
+    Channels/
+      {ChannelName}ChannelSender.cs
 
 {Module}.Domain/
   Migrations/

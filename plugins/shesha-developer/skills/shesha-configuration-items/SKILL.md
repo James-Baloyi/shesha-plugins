@@ -39,16 +39,16 @@ Scaffold and manage custom configuration items for a Shesha/.NET/ABP/NHibernate 
     M{YYYYMMDDHHmmss}.cs                  ← Migration (artifact 2)
 
 {Module}.Application/
-  {ConfigName}s/
-    I{ConfigName}Manager.cs                ← Manager interface (artifact 3)
-    {ConfigName}Manager.cs                 ← Manager implementation (artifact 3)
-    Distribution/
-      Dto/
+  ConfigurationItems/
+    {ConfigName}s/
+      I{ConfigName}Manager.cs                ← Manager interface (artifact 3)
+      {ConfigName}Manager.cs                 ← Manager implementation (artifact 3)
+      Distribution/
         Distributed{ConfigName}.cs         ← Distribution DTO (artifact 4)
-      I{ConfigName}Export.cs               ← Exporter interface (artifact 5)
-      {ConfigName}Export.cs                ← Exporter implementation (artifact 5)
-      I{ConfigName}Import.cs               ← Importer interface (artifact 6)
-      {ConfigName}Import.cs                ← Importer implementation (artifact 6)
+        I{ConfigName}Export.cs               ← Exporter interface (artifact 5)
+        {ConfigName}Export.cs                ← Exporter implementation (artifact 5)
+        I{ConfigName}Import.cs               ← Importer interface (artifact 6)
+        {ConfigName}Import.cs                ← Importer implementation (artifact 6)
   {Module}ApplicationModule.cs             ← Registration (artifact 7)
 ```
 

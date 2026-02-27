@@ -36,7 +36,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-namespace {Namespace}.Services.Notifications.Channels
+namespace {Namespace}.Notifications.Channels
 {
     /// <summary>
     /// Sends notifications via {ChannelName}.
@@ -121,7 +121,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-namespace MyProject.Services.Notifications.Channels
+namespace MyProject.Notifications.Channels
 {
     public class SlackChannelSender : INotificationChannelSender, ITransientDependency
     {
@@ -204,7 +204,7 @@ namespace {Namespace}.Migrations
                     Description = "{Description of channel}",
                     SupportedFormatLkp = 1,       // See lookup values below
                     SupportedMechanismLkp = 1,    // See lookup values below
-                    SenderTypeName = "{Namespace}.Services.Notifications.Channels.{ChannelName}ChannelSender",
+                    SenderTypeName = "{Namespace}.Notifications.Channels.{ChannelName}ChannelSender",
                     StatusLkp = 1,                // 1 = Enabled
                     SupportsAttachment = false,
                     CreationTime = DateTime.UtcNow

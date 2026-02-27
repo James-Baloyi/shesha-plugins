@@ -15,7 +15,7 @@ Define an interface for each business domain's notification needs:
 using System;
 using System.Threading.Tasks;
 
-namespace {Namespace}.Services.Notifications
+namespace {Namespace}.Notifications
 {
     /// <summary>
     /// Sends notifications related to {Domain}.
@@ -36,7 +36,7 @@ namespace {Namespace}.Services.Notifications
 ### Real-World Example
 
 ```csharp
-namespace Shesha.Leave.Application.Services.Notifications
+namespace Shesha.Leave.Application.Notifications
 {
     public interface ILeaveApplicantNotificationSender : ITransientDependency
     {
@@ -59,7 +59,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-namespace {Namespace}.Services.Notifications
+namespace {Namespace}.Notifications
 {
     public class {Domain}NotificationSender : I{Domain}NotificationSender, ITransientDependency
     {
@@ -141,7 +141,7 @@ using Shesha.Notifications;
 using System;
 using System.Threading.Tasks;
 
-namespace Shesha.Leave.Application.Services.Notifications
+namespace Shesha.Leave.Application.Notifications
 {
     public class LeaveApplicantNotificationSender : ILeaveApplicantNotificationSender
     {
@@ -213,7 +213,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-namespace Shesha.Hcm.Common.Services.Notifications
+namespace Shesha.Hcm.Common.Notifications
 {
     public class ChangeOfSupervisorNotificationSender : IChangeOfSupervisorNotificationSender, ITransientDependency
     {

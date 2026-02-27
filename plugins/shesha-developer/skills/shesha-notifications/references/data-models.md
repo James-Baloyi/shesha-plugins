@@ -12,7 +12,7 @@ Create a class extending `NotificationData` with properties matching your templa
 ```csharp
 using Abp.Notifications;
 
-namespace {Namespace}.Services.Notifications
+namespace {Namespace}.Notifications
 {
     /// <summary>
     /// Data model for {Domain} notifications.
@@ -44,7 +44,7 @@ namespace {Namespace}.Services.Notifications
 ```csharp
 using Abp.Notifications;
 
-namespace Shesha.Leave.Application.Services.Notifications
+namespace Shesha.Leave.Application.Notifications
 {
     public class LeaveApplicationNotificationDto : NotificationData
     {
@@ -63,7 +63,7 @@ namespace Shesha.Leave.Application.Services.Notifications
 ```csharp
 using Abp.Notifications;
 
-namespace Shesha.Hcm.Common.Services.Notifications
+namespace Shesha.Hcm.Common.Notifications
 {
     public class ChangeOfSupervisorNotificationModel : NotificationData
     {
@@ -93,4 +93,4 @@ This is equivalent to a custom model — the template engine looks up keys the s
 | Model class | `{Domain}NotificationModel` or `{Domain}NotificationDto` |
 | File name | `{Domain}NotificationModel.cs` |
 | Location | `{Module}.Application/Services/Notifications/` |
-| Namespace | `{Namespace}.Services.Notifications` |
+| Namespace | `{Namespace}.Notifications` |
