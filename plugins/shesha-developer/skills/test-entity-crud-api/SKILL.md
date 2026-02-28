@@ -48,7 +48,35 @@ powershell -ExecutionPolicy Bypass -File "<skill-base-dir>/scripts/Run-EndpointT
 
 Replace `<skill-base-dir>` with this skill's base directory and `<repo-root>` with the project's repository root (the working directory).
 
-Add `-StartServer` if `--start-server` was passed. This will first run `dotnet build` on the auto-detected solution, then start the server with `--no-build`.
+Add `-StartServer` if `--start-server` was passed. Before running the test script, follow the server startup procedure below.
+
+#### Server Startup Procedure (when `-StartServer` is used)
+
+1. **Auto-detect the Web.Host project:** Find `backend/**/*.Web.Host.csproj`
+2. **Build the solution:**
+   ```powershell
+   dotnet build "<path-to-sln>" -c Debug
+   ```
+3. **Start the server in the background with output visible** so startup errors and logs can be diagnosed:
+   ```powershell
+   $ServerProcess = Start-Process -FilePath "dotnet" -ArgumentList "run","--project","<path-to-Web.Host.csproj>","--no-build","--no-launch-profile" -PassThru -NoNewWindow
+   ```
+   Using `-NoNewWindow` keeps the server's stdout/stderr in the current console so you can see startup errors, migration failures, binding issues, etc. The `-PassThru` flag returns the process object for later cleanup.
+4. **Wait for the server to become ready** by polling the base URL (up to 60 seconds):
+   ```powershell
+   $Ready = $false
+   for ($i = 0; $i -lt 30; $i++) {
+       Start-Sleep -Seconds 2
+       try { Invoke-WebRequest -Uri "$BaseUrl/api/services/app/Session/GetCurrentLoginInformations" -UseBasicParsing -ErrorAction Stop | Out-Null; $Ready = $true; break } catch {}
+   }
+   if (-not $Ready) { Write-Host "ERROR: Server did not start within 60 seconds. Check the output above for errors." -ForegroundColor Red; exit 1 }
+   ```
+5. **After tests complete**, stop the server:
+   ```powershell
+   if ($ServerProcess -and -not $ServerProcess.HasExited) { Stop-Process -Id $ServerProcess.Id -Force }
+   ```
+
+**IMPORTANT:** Always use `-NoNewWindow` (not `-RedirectStandardOutput` to a file or `-WindowStyle Hidden`) so that server output is immediately visible in the console for diagnosing startup failures.
 
 ### Step 3: Analyze Results
 
