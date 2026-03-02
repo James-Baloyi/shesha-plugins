@@ -1,5 +1,13 @@
 # Domain Layer Workflow Artifacts
 
+- [§1. Workflow Instance](#1-workflow-instance) — entity being tracked by the workflow
+- [§2. Workflow Definition](#2-workflow-definition) — configuration + `CreateInstance()` factory
+- [§3. Workflow Manager](#3-workflow-manager) — orchestration, status sync, guards
+- [§4. Lifecycle Operations](#4-workflow-lifecycle-operations-suspend--resume--cancel--start) — suspend/resume/cancel/start
+- [§5. Batch Workflow Manager](#5-batch-workflow-manager-cycle-based-bulk-initiation) — cycle-based bulk initiation
+
+---
+
 ## §1. Workflow Instance
 
 **File:** `{WorkflowName}Workflow.cs` in `Domain/{WorkflowName}Workflows/`
@@ -285,28 +293,23 @@ namespace {ModuleNamespace}.Domain.{WorkflowName}Workflows
 }
 ```
 
-**Manager with manual instance creation** (when definition has no `CreateInstance()` — uses `IWorkflowInstanceRepository`):
+**Manager with manual instance creation** (when definition has no `CreateInstance()` — uses direct repository insert):
 
 ```csharp
-using Shesha.Workflow.Helpers;
-...
 public class {WorkflowName}WorkflowManager : DomainService
 {
     private readonly IRepository<{WorkflowName}Workflow, Guid> _workflowRepository;
     private readonly IRepository<{WorkflowName}WorkflowDefinition, Guid> _definitionRepository;
     private readonly IRepository<{ModelEntity}, Guid> _modelRepository;
-    private readonly IWorkflowInstanceRepository _workflowInstanceRepository;
 
     public {WorkflowName}WorkflowManager(
         IRepository<{WorkflowName}Workflow, Guid> workflowRepository,
         IRepository<{WorkflowName}WorkflowDefinition, Guid> definitionRepository,
-        IRepository<{ModelEntity}, Guid> modelRepository,
-        IWorkflowInstanceRepository workflowInstanceRepository)
+        IRepository<{ModelEntity}, Guid> modelRepository)
     {
         _workflowRepository = workflowRepository;
         _definitionRepository = definitionRepository;
         _modelRepository = modelRepository;
-        _workflowInstanceRepository = workflowInstanceRepository;
     }
 
     public virtual async Task<{WorkflowName}Workflow> StartAsync(Guid modelId)
@@ -316,8 +319,8 @@ public class {WorkflowName}WorkflowManager : DomainService
         // Guard: no duplicate active workflow
         var existing = _workflowRepository.GetAll()
             .Where(w => w.Model.Id == modelId
-                     && w.Status != WorkflowStatus.Cancelled
-                     && w.Status != WorkflowStatus.Completed)
+                     && w.Status != RefListWorkflowStatus.Cancelled
+                     && w.Status != RefListWorkflowStatus.Completed)
             .FirstOrDefault();
         if (existing != null)
             throw new UserFriendlyException($"Active workflow already exists for '{model.Name}'.");
@@ -330,9 +333,9 @@ public class {WorkflowName}WorkflowManager : DomainService
         var workflow = new {WorkflowName}Workflow
         {
             Model = model,
-            Definition = definition,
-            Status = WorkflowStatus.InProgress,
-            Name = $"{Friendly Name} - {model.Name}"
+            WorkflowDefinition = definition,
+            Status = RefListWorkflowStatus.InProgress,
+            Subject = $"{Friendly Name} - {model.Name}"
         };
 
         await _workflowRepository.InsertAsync(workflow);
@@ -344,7 +347,7 @@ public class {WorkflowName}WorkflowManager : DomainService
     {
         return _workflowRepository.GetAll()
             .Where(w => w.Model.Id == modelId
-                     && w.Status == WorkflowStatus.InProgress)
+                     && w.Status == RefListWorkflowStatus.InProgress)
             .OrderByDescending(w => w.CreationTime)
             .FirstOrDefault();
     }
@@ -368,3 +371,288 @@ public class {WorkflowName}WorkflowManager
 ```
 
 **Manager responsibilities:** subject generation, status sync between `SubStatus` and model `Status`, NHibernate session refresh, cross-workflow coordination, duplicate active workflow guard, completing user tasks via `IProcessDomainService`.
+
+---
+
+## §4. Workflow Lifecycle Operations (Suspend / Resume / Cancel / Start)
+
+Add these methods to any `{WorkflowName}WorkflowManager` that needs to control workflow state programmatically.
+All operations guard against invalid state transitions before calling the engine.
+
+```csharp
+using Shesha.Workflow.AppServices.Processes;
+using Shesha.Workflow.AppServices.Processes.Dto;
+using Shesha.Workflow.Domain.Enums;
+
+// ── Injected dependencies ──────────────────────────────────────────────────────
+private readonly ProcessAppService _processAppService;
+private readonly IRepository<WorkflowInstance, Guid> _workflowInstanceRepo;
+
+// ── Suspend (pause an in-progress workflow) ────────────────────────────────────
+public async Task SuspendWorkflowAsync(Guid workflowInstanceId, string comments = "")
+{
+    var instance = await _workflowInstanceRepo.GetAsync(workflowInstanceId);
+    if (instance.Status != RefListWorkflowStatus.InProgress)
+        throw new UserFriendlyException("Only in-progress workflows can be suspended.");
+
+    await _processAppService.SuspendAsync(new SuspendProcessInput
+    {
+        WorkflowInstanceId = instance.Id,
+        Comments = comments
+    });
+}
+
+// Bulk suspend — e.g. close all workflows for a cycle
+public async Task SuspendAllAsync(IEnumerable<Guid> workflowInstanceIds, string comments = "")
+{
+    foreach (var id in workflowInstanceIds)
+    {
+        var instance = await _workflowInstanceRepo.GetAsync(id);
+        if (instance.Status == RefListWorkflowStatus.InProgress)
+            await _processAppService.SuspendAsync(new SuspendProcessInput
+            {
+                WorkflowInstanceId = id,
+                Comments = comments
+            });
+    }
+}
+
+// ── Resume (un-pause a suspended workflow) ─────────────────────────────────────
+public async Task ResumeWorkflowAsync(Guid workflowInstanceId, string comments = "")
+{
+    var instance = await _workflowInstanceRepo.GetAsync(workflowInstanceId);
+    if (instance.Status != RefListWorkflowStatus.Suspended
+        && instance.Status != RefListWorkflowStatus.Draft)
+        throw new UserFriendlyException("Only suspended or draft workflows can be resumed.");
+
+    await _processAppService.ResumeAsync(new ResumeProcessInput
+    {
+        WorkflowInstanceId = instance.Id,
+        Comments = comments
+    });
+}
+
+// ── Cancel (permanently end a workflow) ───────────────────────────────────────
+public async Task CancelWorkflowAsync(Guid workflowInstanceId, string comments = "")
+{
+    var instance = await _workflowInstanceRepo.GetAsync(workflowInstanceId);
+    if (instance.Status != RefListWorkflowStatus.InProgress
+        && instance.Status != RefListWorkflowStatus.Suspended)
+        throw new UserFriendlyException("Only in-progress or suspended workflows can be cancelled.");
+
+    await _processAppService.CancelAsync(new CancelProcessInput
+    {
+        WorkflowInstanceId = instance.Id,
+        Comments = comments
+    });
+}
+
+// ── Start a child/related workflow by name ─────────────────────────────────────
+public async Task<Guid> StartChildWorkflowAsync(
+    {ChildWorkflow}Workflow parentWorkflow,
+    string comments = "")
+{
+    var definitionId = new WorkflowDefinitionIdentifier(
+        {ChildModule}.ModuleName,
+        "{child-workflow-discriminator-slug}");
+
+    return await _processDomainService.StartByNameAsync<
+        {ChildWorkflowDefinition},
+        {ChildWorkflow}Workflow>(
+        definitionId,
+        async (instance) =>
+        {
+            instance.Model = parentWorkflow.Model.{ChildEntity};
+            instance.Subject = parentWorkflow.Subject;
+            // Set any other properties needed by the child workflow
+        });
+}
+```
+
+**Status transition guard pattern** — check before any write operation that depends on workflow state:
+
+```csharp
+public async Task<bool> HasActiveWorkflowAsync(Guid modelId)
+{
+    return await _workflowRepository.CountAsync(w =>
+        w.Model.Id == modelId &&
+        w.Status == RefListWorkflowStatus.InProgress) > 0;
+}
+
+// Guard in an app service before allowing a new action:
+if (await _workflowManager.HasActiveWorkflowAsync(modelId))
+    throw new UserFriendlyException(
+        "Action not allowed while a workflow is in progress.");
+```
+
+---
+
+## §5. Batch Workflow Manager (Cycle-Based Bulk Initiation)
+
+Use when a single user action (e.g. "open a performance cycle") must create workflow instances for many entities in parallel.
+This pattern belongs in the Domain layer because it orchestrates domain entities; the Application layer only exposes it via app services and Hangfire jobs.
+
+```csharp
+using Abp.Domain.Repositories;
+using Abp.Domain.Services;
+using Abp.Domain.Uow;
+using Shesha.Workflow.DomainServices;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace {ModuleNamespace}.Domain.{WorkflowName}Workflows
+{
+    public class {WorkflowName}WorkflowManager<TWorkflowDefinition, TWorkflow, TModel>
+        : DomainService
+        where TWorkflowDefinition : {WorkflowName}WorkflowDefinitionBase
+        where TWorkflow : {WorkflowName}WorkflowBase<TModel>
+        where TModel : {ModelEntity}
+    {
+        private const int DefaultBatchSize = 1;
+        private const int DefaultMaxDegreeOfParallelism = 10;
+
+        private readonly IRepository<TModel, Guid> _modelRepository;
+        private readonly IRepository<TWorkflow, Guid> _workflowRepository;
+        private readonly IProcessDomainService _processDomainService;
+        private readonly IUnitOfWorkManager _unitOfWorkManager;
+
+        public {WorkflowName}WorkflowManager(
+            IRepository<TModel, Guid> modelRepository,
+            IRepository<TWorkflow, Guid> workflowRepository,
+            IProcessDomainService processDomainService,
+            IUnitOfWorkManager unitOfWorkManager)
+        {
+            _modelRepository = modelRepository;
+            _workflowRepository = workflowRepository;
+            _processDomainService = processDomainService;
+            _unitOfWorkManager = unitOfWorkManager;
+        }
+
+        /// <summary>Entry point — retrieves eligible entities and initiates workflows in batches.</summary>
+        public async Task ProcessCycleAsync({CycleEntity} cycle, long? creatorUserId = null)
+        {
+            var eligibleModels = await _modelRepository.GetAll()
+                .Where(m => m.Cycle.Id == cycle.Id && !m.WorkflowStarted)
+                .ToListAsync();
+
+            await ProcessEntitiesInBatchesAsync(eligibleModels, creatorUserId);
+        }
+
+        private async Task ProcessEntitiesInBatchesAsync(
+            IList<TModel> models,
+            long? creatorUserId,
+            int batchSize = DefaultBatchSize,
+            int maxParallelism = DefaultMaxDegreeOfParallelism)
+        {
+            var semaphore = new SemaphoreSlim(maxParallelism);
+
+            var tasks = models.Chunk(batchSize).Select(async batch =>
+            {
+                await semaphore.WaitAsync();
+                try
+                {
+                    foreach (var model in batch)
+                    {
+                        using var uow = _unitOfWorkManager.Begin();
+                        await CreateWorkflowForEntityAsync(model, creatorUserId);
+                        await uow.CompleteAsync();
+                    }
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks);
+        }
+
+        private async Task CreateWorkflowForEntityAsync(TModel model, long? creatorUserId)
+        {
+            // Guard: skip if an active workflow already exists
+            var existing = _workflowRepository.GetAll()
+                .FirstOrDefault(w => w.Model.Id == model.Id
+                                  && w.Status == RefListWorkflowStatus.InProgress);
+            if (existing != null)
+                return;
+
+            var definitionId = new WorkflowDefinitionIdentifier(
+                {ModuleName}.Name,
+                "{workflow-discriminator-slug}");
+
+            await _processDomainService.StartByNameAsync<TWorkflowDefinition, TWorkflow>(
+                definitionId,
+                async (instance) =>
+                {
+                    instance.Model = model;
+                    instance.Subject = $"{model.Name} — {model.Person?.FullName}";
+                    if (creatorUserId.HasValue)
+                        instance.CreatorUserId = creatorUserId;
+                });
+
+            model.WorkflowStarted = true;
+            await _modelRepository.UpdateAsync(model);
+        }
+
+        /// <summary>Suspend all in-progress workflows for a cycle (e.g. "close a cycle").</summary>
+        public async Task CloseWorkflowsAsync(
+            Guid cycleId,
+            ProcessAppService processAppService,
+            string comments = "Cycle closed")
+        {
+            var workflows = await _workflowRepository.GetAll()
+                .Where(w => w.Model.Cycle.Id == cycleId
+                         && w.Status == RefListWorkflowStatus.InProgress)
+                .ToListAsync();
+
+            foreach (var wf in workflows)
+                await processAppService.SuspendAsync(new SuspendProcessInput
+                {
+                    WorkflowInstanceId = wf.Id,
+                    Comments = comments
+                });
+        }
+
+        /// <summary>Resume all suspended workflows for a cycle (e.g. "reopen a cycle").</summary>
+        public async Task ReopenWorkflowsAsync(
+            Guid cycleId,
+            ProcessAppService processAppService,
+            string comments = "Cycle reopened")
+        {
+            var workflows = await _workflowRepository.GetAll()
+                .Where(w => w.Model.Cycle.Id == cycleId
+                         && w.Status == RefListWorkflowStatus.Suspended)
+                .ToListAsync();
+
+            foreach (var wf in workflows)
+                await processAppService.ResumeAsync(new ResumeProcessInput
+                {
+                    WorkflowInstanceId = wf.Id,
+                    Comments = comments
+                });
+        }
+    }
+}
+```
+
+**Concrete specialization** (subclass with fixed generic params for a specific module):
+
+```csharp
+public class {Module}{WorkflowName}WorkflowManager
+    : {WorkflowName}WorkflowManager<
+        {Module}{WorkflowName}WorkflowDefinition,
+        {Module}{WorkflowName}Workflow,
+        {Module}{ModelEntity}>
+{
+    public {Module}{WorkflowName}WorkflowManager(/* same params as base */) : base(/* pass through */) { }
+}
+```
+
+**Key rules:**
+- Keep `DefaultBatchSize = 1` and `DefaultMaxDegreeOfParallelism = 10` as starting defaults; tune per domain requirements
+- Each entity in a batch runs in its own `IUnitOfWorkManager.Begin()` so one failure doesn't block the rest
+- Guard against duplicate active workflows before calling `StartByNameAsync`
+- Mark `model.WorkflowStarted = true` (or equivalent flag) after successful start to make the operation idempotent

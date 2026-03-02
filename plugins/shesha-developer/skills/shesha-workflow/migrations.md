@@ -53,7 +53,7 @@ namespace {ModuleNamespace}.Domain.Migrations
 - Definition table only needs `.WithIdAsGuid()`
 - Both tables MUST have FKs to the `workflow` schema
 - FK naming: `fk_{Prefix}_{Name}Workflows_wf_inst` and `fk_{Prefix}_{Name}WorkflowDefinitions_config_item`
-- Module prefixes: `SaGov_`, `Leave_`, `Pmds_`, `Hcm_`, `LB_`
+- Module prefix: use the project's established convention — inspect nearby migrations to determine the correct prefix (e.g. `Leave_`, `Pmds_`, `Hcm_`)
 
 **With multiple FK columns** (when the workflow instance references more than one entity — e.g. PartOf + Model):
 
@@ -96,7 +96,7 @@ public class M{YYYYMMDDHHmmss} : Migration
             .AddColumn("StatusLkp").AsInt64().Nullable();
 
         Alter.Table("{Prefix}_{WorkflowName}Workflows")
-            .AddForeignKeyColumn("SupervisorPositionId", "entpr_Positions").Nullable();
+            .AddForeignKeyColumn("SupervisorPositionId", "{Prefix}_Positions").Nullable();
     }
 
     public override void Down()

@@ -22,10 +22,15 @@ Generate workflow artifacts for a Shesha/.NET/ABP/NHibernate application based o
 | 1 | Workflow Instance | Domain | [domain-artifacts.md](domain-artifacts.md) §1 |
 | 2 | Workflow Definition | Domain | [domain-artifacts.md](domain-artifacts.md) §2 |
 | 3 | Workflow Manager | Domain | [domain-artifacts.md](domain-artifacts.md) §3 |
-| 4 | Service Task | Application | [service-tasks.md](service-tasks.md) §1 |
-| 5 | Generic Base Service Task | Application | [service-tasks.md](service-tasks.md) §2 |
-| 6 | Workflow Extensions | Application | [service-tasks.md](service-tasks.md) §3 |
-| 7 | Database Migration | Domain | [migrations.md](migrations.md) |
+| 4 | Lifecycle Operations (Suspend/Resume/Cancel/Start) | Domain | [domain-artifacts.md](domain-artifacts.md) §4 |
+| 5 | Batch Workflow Manager (cycle-based bulk initiation) | Domain | [domain-artifacts.md](domain-artifacts.md) §5 |
+| 6 | Service Task | Application | [service-tasks.md](service-tasks.md) §1 |
+| 7 | Service Task with Typed Arguments | Application | [service-tasks.md](service-tasks.md) §2 |
+| 8 | Generic Base Service Task | Application | [service-tasks.md](service-tasks.md) §3 |
+| 9 | External-System Await / Auto-Completion Helper | Application | [service-tasks.md](service-tasks.md) §4 |
+| 10 | Workflow Extensions | Application | [service-tasks.md](service-tasks.md) §5 |
+| 11 | Hangfire Background Job for Batch Initiation | Application | [service-tasks.md](service-tasks.md) §6 |
+| 12 | Database Migration | Domain | [migrations.md](migrations.md) |
 
 **When generating multiple artifacts**, always create the Instance + Definition pair first, then add Service Tasks per workflow step.
 
@@ -34,19 +39,25 @@ Generate workflow artifacts for a Shesha/.NET/ABP/NHibernate application based o
 ```
 {Module}.Domain/
   Domain/{WorkflowName}Workflows/
-    {WorkflowName}Workflow.cs
-    {WorkflowName}WorkflowDefinition.cs
-    {WorkflowName}WorkflowManager.cs
+    {WorkflowName}Workflow.cs                   ← Instance (§1)
+    {WorkflowName}WorkflowDefinition.cs         ← Definition (§2)
+    {WorkflowName}WorkflowManager.cs            ← Manager + lifecycle ops (§3, §4)
+    {WorkflowName}BatchWorkflowManager.cs       ← Batch manager when needed (§5)
   Migrations/
     M{YYYYMMDDHHmmss}.cs
 
 {Module}.Application/
+  Jobs/
+    Initiate{WorkflowName}WorkflowsJob.cs       ← Hangfire background job (§6)
+  Services/
+    {ExternalSystem}/
+      {ExternalSystem}WorkflowHelper.cs         ← External-trigger helper (§4)
   Workflows/
     Common/
-      {TaskName}ServiceTaskBase.cs
+      {TaskName}ServiceTaskBase.cs              ← Generic base task (§3)
     {WorkflowNamePlural}/
-      {TaskName}ServiceTask.cs
-      {WorkflowName}WorkflowExtensions.cs
+      {TaskName}ServiceTask.cs                  ← Service task (§1 or §2)
+      {WorkflowName}WorkflowExtensions.cs       ← Extension methods (§5)
 ```
 
 ## Quick reference
@@ -58,19 +69,26 @@ Generate workflow artifacts for a Shesha/.NET/ABP/NHibernate application based o
 | Workflow Instance | `WorkflowInstanceWithTypedDefinition<TDefinition>` (`Shesha.Workflow.Domain`) |
 | Workflow Definition | `WorkflowDefinition` |
 | Workflow Manager | `DomainService` |
+| Batch Workflow Manager | `DomainService` with generic params `<TDef, TInstance, TModel>` |
 | Service Task | `AsyncServiceTask<TWorkflow>` + `ITransientDependency` |
+| Service Task with Args | `AsyncServiceTask<TWorkflow, TArgs>` + `ITransientDependency` |
 | Generic Base Task | `AsyncServiceTask<TWorkflow> where TWorkflow : WorkflowInstance` |
 | Gateway condition ext. | `static class` on `WorkflowInstance` → returns `bool` |
 | Action ext. methods | `static class` on typed `{WorkflowName}Workflow` → returns `Task` |
+| Background Job | `ITransientDependency` (NOT `ScheduledJobBase`) |
 | DB Migration | `Migration` or `OneWayMigration` |
 
 ### Key dependencies
 
-| Interface | Namespace | Use |
-|-----------|-----------|-----|
-| `IWfRunArguments` | `Shesha.Workflow.Services` | Service task `ExecuteAsync` parameter |
-| `IWorkflowInstanceRepository` | `Shesha.Workflow.Helpers` | Manager manual instance creation |
-| `IProcessDomainService` | `Shesha.Workflow.DomainServices` | Complete user tasks |
+| Interface / Class | Namespace | Use |
+|-------------------|-----------|-----|
+| `ServiceTaskExecutionContext<T>` | `Shesha.Workflow.Tasks` | Service task `RunAsync` parameter |
+| `ServiceTaskExecutionContext<T, TArgs>` | `Shesha.Workflow.Tasks` | Typed-args task `RunAsync` parameter |
+| `IProcessDomainService` | `Shesha.Workflow.DomainServices` | Start by name, complete user tasks |
+| `ProcessAppService` | `Shesha.Workflow.AppServices.Processes` | Suspend / Resume / Cancel |
+| `IWorkflowHelper` | `Shesha.Workflow` | Resume user task, emit message, get variables |
+| `WorkflowExecutionLogItem` | `Shesha.Workflow.Domain` | External-trigger auto-completion |
+| `IRepository<WorkflowInstance, Guid>` | `Abp.Domain.Repositories` | Manager manual instance creation |
 | `ILogger<T>` | `Microsoft.Extensions.Logging` | Structured logging in service tasks |
 
 ### Key attributes
@@ -81,20 +99,28 @@ Generate workflow artifacts for a Shesha/.NET/ABP/NHibernate application based o
 | `[Prefix(UsePrefixes = false)]` | Instance |
 | `[Entity(TypeShortAlias = "...")]` | Instance |
 | `[DiscriminatorValue("slug")]` | Definition |
+| `[ServiceTaskArguments("slug")]` | Typed-args service task class |
 | `[Display(Name, Description)]` | Definition, Service Task |
 | `[Migration(YYYYMMDDHHmmss)]` | Migration class |
 
 ### Service task method signature
 
 ```csharp
-// CORRECT — returns Task<bool>; workflow passed directly
-public override async Task<bool> ExecuteAsync({WorkflowName}Workflow workflow, IWfRunArguments wfRunArguments)
+// CORRECT — override RunAsync, return Task (void), access workflow via context
+public override async Task RunAsync(ServiceTaskExecutionContext<{WorkflowName}Workflow> context)
 {
-    // ... logic ...
+    var workflow = context.WorkflowInstance;  // typed workflow instance
+    // context.Pvc  →  IReadWriteVariables (process variable container)
     await _workflowRepository.UpdateAsync(workflow);
-    return true;
 }
-// IWfRunArguments from Shesha.Workflow.Services
+
+// With typed arguments:
+public override async Task RunAsync(
+    ServiceTaskExecutionContext<{WorkflowName}Workflow, {TaskName}Args> context)
+{
+    var workflow = context.WorkflowInstance;
+    var args = context.Arguments;  // populated by the BPMN designer
+}
 ```
 
 ### Common patterns
@@ -118,18 +144,73 @@ var repo = IocManager.Instance.Resolve<IRepository<{Entity}, Guid>>();
 **Check definition config in a service task:**
 ```csharp
 if (workflow.Definition?.{ConfigFlag} != true)
-    return true; // feature disabled — skip silently
+    return; // feature disabled — skip silently
 ```
 
-**Complete a user task programmatically:**
+**Suspend a workflow:**
 ```csharp
-var args = new CompleteUserTaskArgs<{WorkflowName}Workflow>
+await _processAppService.SuspendAsync(new SuspendProcessInput
 {
-    WorkflowTodoItemId = todoItem.Id,
-    Comments = comments,
-    DecisionUid = decisionUid
-};
-await _processDomainService.CompleteUserTaskAsync(args);
+    WorkflowInstanceId = workflowInstance.Id,
+    Comments = "Paused pending external action"
+});
+```
+
+**Resume a workflow:**
+```csharp
+await _processAppService.ResumeAsync(new ResumeProcessInput
+{
+    WorkflowInstanceId = workflowInstance.Id,
+    Comments = "Resumed after external action completed"
+});
+```
+
+**Cancel a workflow:**
+```csharp
+await _processAppService.CancelAsync(new CancelProcessInput
+{
+    WorkflowInstanceId = workflowInstance.Id,
+    Comments = "Cancelled — reason here"
+});
+```
+
+**Start a workflow by name (programmatic):**
+```csharp
+await _processDomainService.StartByNameAsync<{WorkflowDefinition}, {WorkflowInstance}>(
+    new WorkflowDefinitionIdentifier({ModuleName}.Name, "{discriminator-slug}"),
+    async (instance) =>
+    {
+        instance.Model = myEntity;
+        instance.Subject = "Workflow subject text";
+    });
+```
+
+**Auto-complete a workflow step from an external trigger:**
+```csharp
+// Find the active log item by step name, then complete it:
+var logItem = _logItemRepo.GetAll()
+    .FirstOrDefault(i => i.WorkflowTask.ActionText == stepName
+                      && i.CompletedOn == null
+                      && i.IsLast == true
+                      && i.Status == RefListWorkflowLogItemStatus.Active);
+if (logItem != null)
+    await _workflowHelper.ResumeUserTaskAsync(logItem.WorkflowTask,
+        new UserTaskResponse { Decision = "{decision-uid}", Comment = "Auto-completed" });
+```
+
+**Check active workflow guard:**
+```csharp
+var hasActive = await _workflowRepo.CountAsync(w =>
+    w.Model.Id == modelId &&
+    w.Status == RefListWorkflowStatus.InProgress) > 0;
+if (hasActive)
+    throw new UserFriendlyException("An active workflow already exists.");
+```
+
+**Enqueue batch initiation to Hangfire:**
+```csharp
+BackgroundJob.Enqueue<Initiate{WorkflowName}WorkflowsJob>(
+    j => j.ExecuteAsync(initiateDto));
 ```
 
 ## Migration table naming
@@ -139,6 +220,6 @@ await _processDomainService.CompleteUserTaskAsync(args);
 | Instance | `{Prefix}_{WorkflowName}Workflows` | `workflow.workflow_instances` |
 | Definition | `{Prefix}_{WorkflowName}WorkflowDefinitions` | `workflow.workflow_definitions` |
 
-Module prefixes: `SaGov_`, `Leave_`, `Pmds_`, `Hcm_`, `LB_`
+Use the project's established module prefix (e.g. `Leave_`, `Pmds_`, `Hcm_`) — inspect nearby migrations to determine the correct prefix for the target module.
 
 Now generate the requested workflow artifact(s) based on: $ARGUMENTS
