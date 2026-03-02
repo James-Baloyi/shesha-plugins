@@ -9,6 +9,7 @@ Use this approach when you want the endpoint auto-registered by the Shesha modul
 ```csharp
 using Abp.Domain.Repositories;
 using Abp.UI;
+using Aspose.Words.MailMerging;
 using AutoMapper;
 using Microsoft.AspNetCore.Mvc;
 using NHibernate.Linq;
@@ -654,3 +655,137 @@ namespace {Namespace}.PdfDocuments.{DocumentName}
 - The embedded resource name is the full namespace path with dots. Ensure the resource name matches what `GetResourceTemplate` expects.
 - This approach is ideal for templates that are part of the codebase and should be version-controlled alongside the code.
 - You can combine this with `FileTemplateConfiguration` — upload a template via admin UI to override the embedded default.
+
+---
+
+## SS6 — StoredFile Template Source (Direct Aspose)
+
+Use this approach when the Word template is stored as a `StoredFile` on a domain entity (e.g., a configuration entity's template field) rather than in a `FileTemplateConfiguration` or embedded resource. Common for configurable document generation where administrators upload templates per workflow/config.
+
+### Template
+
+```csharp
+using Abp.Dependency;
+using Abp.Domain.Repositories;
+using Aspose.Words;
+using Aspose.Words.MailMerging;
+using Castle.Core.Logging;
+using Shesha.Services;
+using System;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace {Namespace}.Services.{DocumentName}
+{
+    /// <summary>
+    /// Generates documents from a Word template stored as a StoredFile on a domain entity,
+    /// performs Aspose mail merge, and saves the result as a new StoredFile.
+    /// </summary>
+    public class {DocumentName}Generator : I{DocumentName}Generator, ITransientDependency
+    {
+        private readonly IStoredFileService _storedFileService;
+        private readonly IRepository<{OwnerEntity}, Guid> _ownerRepository;
+        private readonly IRepository<{DataEntity}, Guid> _dataRepository;
+
+        public ILogger Logger { get; set; } = NullLogger.Instance;
+
+        public {DocumentName}Generator(
+            IStoredFileService storedFileService,
+            IRepository<{OwnerEntity}, Guid> ownerRepository,
+            IRepository<{DataEntity}, Guid> dataRepository)
+        {
+            _storedFileService = storedFileService;
+            _ownerRepository = ownerRepository;
+            _dataRepository = dataRepository;
+        }
+
+        public async Task GenerateAsync({OwnerEntity} owner)
+        {
+            if (owner == null)
+                throw new ArgumentNullException(nameof(owner));
+
+            // 1. Get template StoredFile from the entity/config
+            var template = owner.{TemplateProperty}
+                ?? throw new InvalidOperationException("No template configured.");
+
+            // 2. Load template stream
+            using var templateStream = await _storedFileService.GetStreamAsync(template);
+            if (templateStream == null)
+            {
+                Logger.Warn($"Could not retrieve template stream. Skipping document generation.");
+                return;
+            }
+
+            using var templateMemory = new MemoryStream();
+            await templateStream.CopyToAsync(templateMemory);
+            templateMemory.Position = 0;
+
+            // 3. Build DTO and extract field names/values
+            var dto = await BuildDtoAsync(owner);
+            var fieldNames = dto.GetType().GetProperties().Select(p => p.Name).ToArray();
+            var fieldValues = dto.GetType().GetProperties().Select(p => p.GetValue(dto) ?? "").ToArray();
+
+            // 4. Open template, perform mail merge
+            var document = new Document(templateMemory);
+
+            document.MailMerge.CleanupOptions =
+                MailMergeCleanupOptions.RemoveEmptyParagraphs
+                | MailMergeCleanupOptions.RemoveUnusedFields
+                | MailMergeCleanupOptions.RemoveUnusedRegions;
+
+            document.MailMerge.Execute(fieldNames, fieldValues);
+
+            // 5. Save as PDF
+            using var pdfStream = new MemoryStream();
+            document.Save(pdfStream, SaveFormat.Pdf);
+            pdfStream.Position = 0;
+
+            // 6. Persist as StoredFile
+            var fileName = $"{DocumentName}_{DateTime.Now:yyyyMMdd}.pdf";
+            var storedFile = await _storedFileService.SaveFileAsync(
+                pdfStream,
+                fileName,
+                file => file.FileType = "application/pdf");
+
+            // 7. Assign to entity and save
+            owner.{OutputProperty} = storedFile;
+            await _ownerRepository.UpdateAsync(owner);
+
+            Logger.Info($"Generated document '{fileName}' for {OwnerEntity} {owner.Id}.");
+        }
+
+        private async Task<{DocumentName}PdfDto> BuildDtoAsync({OwnerEntity} owner)
+        {
+            var dto = new {DocumentName}PdfDto();
+            // Populate DTO fields from owner and related entities
+            // dto.{Field} = owner.{Property}?.ToString() ?? "";
+            return dto;
+        }
+    }
+}
+```
+
+### Interface
+
+```csharp
+using System.Threading.Tasks;
+
+namespace {Namespace}.Services.{DocumentName}
+{
+    public interface I{DocumentName}Generator
+    {
+        Task GenerateAsync({OwnerEntity} owner);
+    }
+}
+```
+
+### Guidance
+
+- Use `IStoredFileService.GetStreamAsync(StoredFile)` to load the template — returns `Task<Stream>` (can be null).
+- Use `IStoredFileService.SaveFileAsync(Stream, string, Action<StoredFile>)` to persist the output — returns `Task<StoredFile>`.
+- **Do not use** `CreateFileAsync` — the correct method is `SaveFileAsync`.
+- Copy the template stream to a `MemoryStream` before passing to `new Document(stream)` — the original stream from `GetStreamAsync` may not be seekable.
+- This pattern is ideal for configuration-driven document generation where templates vary by config record (e.g., different approval types each have their own template).
+- The generator gracefully skips when no template is configured (returns without error), making it safe to call unconditionally.
+- Register the interface via `ITransientDependency` for auto-discovery by ABP's IoC container.

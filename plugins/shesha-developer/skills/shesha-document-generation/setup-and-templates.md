@@ -8,11 +8,11 @@ Add the `Shesha.Enterprise.DocumentProcessing` package to your Application proje
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Shesha.Enterprise.DocumentProcessing" Version="$(SheshaVersion)" />
+  <PackageReference Include="Shesha.Enterprise.DocumentProcessing" Version="$(SheshaEnterpriseVersion)" />
 </ItemGroup>
 ```
 
-> `$(SheshaVersion)` is typically defined in `Directory.Build.props` or the `.csproj`. Check the project's existing Shesha package references for the correct version property.
+> **Important:** This is a Shesha **Enterprise** package, so use `$(SheshaEnterpriseVersion)` — not `$(SheshaVersion)`. Check `Directory.Build.props` for the correct variable name. Look at existing `Shesha.Enterprise.*` package references in the `.csproj` to confirm which version variable to use.
 
 ### Module Dependency
 

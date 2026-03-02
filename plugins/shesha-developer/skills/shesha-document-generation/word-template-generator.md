@@ -68,7 +68,7 @@ function textRun(text, bold = false, opts = {}) {
   const parts = [];
   if (bold) parts.push("<w:b/>");
   if (opts.italic) parts.push("<w:i/>");
-  if (opts.size) parts.push(`<w:sz w:val="${opts.size}"/>`);
+  if (opts.size) parts.push(`<w:sz w:val="${opts.size}"/><w:szCs w:val="${opts.size}"/>`);
   if (opts.color) parts.push(`<w:color w:val="${opts.color}"/>`);
   if (parts.length) rPr = `<w:rPr>${parts.join("")}</w:rPr>`;
   return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r>`;

@@ -15,6 +15,7 @@ Generate document generation artifacts for a Shesha/.NET application that uses `
   2. **Embedded resource** — template bundled in the assembly as an embedded resource, uses `AsposeBuilderBase.GetTemplate()`
   3. **Direct Aspose with dictionary** — manual template lookup, field names as string keys, most control
   4. **Save to StoredFile** — same as (1) or (2) but also persists the generated PDF to a `StoredFile` on the entity
+  5. **StoredFile as template source** — template loaded from a `StoredFile` property on an entity (e.g., a config entity's template field), uses `IStoredFileService.GetStreamAsync()` to load and Aspose directly for mail merge
 - Ask the user which **output format** to use if not specified:
   1. **PDF** (default) — generates a PDF via `document.Save(stream, SaveFormat.Pdf)`
   2. **Word (.docx)** — returns the populated Word document via `document.Save(stream, SaveFormat.Docx)`, preserving editability
@@ -54,9 +55,10 @@ When generating sample `.docx` templates:
 | 6 | Dictionary-based Controller | Application | [document-service.md](document-service.md) SS3 |
 | 7 | Word Document Output (no PDF) | Application | [document-service.md](document-service.md) SS5 |
 | 8 | Embedded Resource variant | Application | [document-service.md](document-service.md) SS4 |
-| 9 | Module/NuGet setup | Domain/Application | [setup-and-templates.md](setup-and-templates.md) SS1 |
-| 10 | Word template design guide | N/A | [setup-and-templates.md](setup-and-templates.md) SS2 |
-| 11 | Sample Word template (.docx) | N/A | [word-template-generator.md](word-template-generator.md) |
+| 9 | StoredFile template source | Application | [document-service.md](document-service.md) SS6 |
+| 10 | Module/NuGet setup | Domain/Application | [setup-and-templates.md](setup-and-templates.md) SS1 |
+| 11 | Word template design guide | N/A | [setup-and-templates.md](setup-and-templates.md) SS2 |
+| 12 | Sample Word template (.docx) | N/A | [word-template-generator.md](word-template-generator.md) |
 
 ## Folder Structure
 
@@ -96,7 +98,11 @@ StoredFile file = await _documentProcessManager.SaveFileAsync(stream, ownerType,
 
 ### Aspose Mail Merge Cleanup Options
 
+**Important:** `MailMergeCleanupOptions` requires `using Aspose.Words.MailMerging;` — this is a separate namespace from `Aspose.Words`.
+
 ```csharp
+using Aspose.Words.MailMerging; // Required for MailMergeCleanupOptions
+
 builder.Document.MailMerge.CleanupOptions =
     MailMergeCleanupOptions.RemoveEmptyParagraphs |
     MailMergeCleanupOptions.RemoveUnusedFields |
@@ -196,12 +202,12 @@ using var memoryStream = new MemoryStream();
 await documentStream.CopyToAsync(memoryStream);
 memoryStream.Position = 0;
 
-var storedFileVersion = await _storedFileService.CreateFileAsync(
+var storedFile = await _storedFileService.SaveFileAsync(
     memoryStream,
     fileName,
-    file => { file.Description = "Generated PDF"; });
+    file => { file.FileType = "application/pdf"; });
 
-entity.PdfDocument = storedFileVersion.File;
+entity.PdfDocument = storedFile;
 await _repository.UpdateAsync(entity);
 ```
 
