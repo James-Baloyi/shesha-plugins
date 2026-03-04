@@ -28,13 +28,23 @@ Whenever making changes to domain model entity classes — whether creating new 
 **MANDATORY: Accurate Migration Timestamps**
 Migration IDs use the format `YYYYMMDDHHmmss` and MUST reflect the **actual current UTC time**. Before creating any migration, run `date -u +"%Y%m%d%H%M%S"` (or `scripts/migration-timestamp.sh`) to get the correct timestamp. Do NOT use placeholder or rounded values — the hour, minute, and second components must be accurate. For multiple migrations in one session, increment the seconds by 1.
 
+**MANDATORY: Offer API-based Reference List Creation for Data-Driven Reference Lists**
+When a domain model change introduces a new data-driven reference list property, you MUST ask the user whether they want the reference list created via the **API** (recommended when the backend server is running) or via a **database migration**. If the user chooses the API approach, follow the [reference/ReferenceLists.md](reference/ReferenceLists.md) § Creating Data-Based Reference Lists via API section. Do NOT create migration-based reference list seeding unless the user explicitly requests it.
+
+**MANDATORY: Report Feedback for Every Reference List Operation**
+When creating or updating reference lists (via API or migration), you MUST always print clear feedback to the user showing:
+- The reference list name and module
+- Each item created/updated with its value and display text
+- The final status (e.g., "Live") after marking it active
+- Any errors encountered
+
 ## Reference Documentation
 
 Detailed implementation patterns and examples are in these files — read the relevant ones based on the task:
 
 - [reference/DomainModelling.md](reference/DomainModelling.md) — Entity classes, base classes, attributes, property conventions, generic entity references, file placement
 - [reference/DomainService.md](reference/DomainService.md) — Domain service/manager classes
-- [reference/ReferenceLists.md](reference/ReferenceLists.md) — Code-based (enum) and data-based reference lists
+- [reference/ReferenceLists.md](reference/ReferenceLists.md) — Code-based (enum) and data-based reference lists, **including API-based creation**
 - [reference/DatabaseMigrations.md](reference/DatabaseMigrations.md) — FluentMigrator migrations, table/column naming, examples
 
 ## Module Manifests - Domain Entity Reference
@@ -162,7 +172,9 @@ Determine the type of change, then follow the appropriate path:
 - [ ] For file/document properties, use StoredFile (direct property or Owner pattern) — do NOT create custom file entities
 - [ ] Create entity class with correct base class, attributes, and properties
 - [ ] Create enum-based reference lists if needed (no migration required for these)
-- [ ] Create data-based reference list migrations if needed
+- [ ] For data-based reference lists: ask user whether to create via API or migration
+      - API (recommended if server is running): see reference/ReferenceLists.md § API section
+      - Migration: create FluentMigrator migration with ReferenceListCreate
 - [ ] Create database migration for new table(s) and columns
 - [ ] Run `/test-entity-crud-api` to verify all CRUD endpoints work
 ```
@@ -173,7 +185,9 @@ Determine the type of change, then follow the appropriate path:
 - [ ] Read existing entity class and identify current migration history
 - [ ] Make property/relationship changes to the entity class
 - [ ] Create enum-based reference lists if needed (no migration required for these)
-- [ ] Create data-based reference list migrations if needed
+- [ ] For data-based reference lists: ask user whether to create via API or migration
+      - API (recommended if server is running): see reference/ReferenceLists.md § API section
+      - Migration: create FluentMigrator migration with ReferenceListCreate
 - [ ] Create database migration to alter existing table (add/rename/modify columns)
 - [ ] Run `/test-entity-crud-api` to verify all CRUD endpoints still work
 ```
