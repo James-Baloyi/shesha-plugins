@@ -10,6 +10,7 @@
 - [String Property Length Guidelines](#string-property-length-guidelines)
 - [The virtual Keyword](#the-virtual-keyword)
 - [Child Entities](#child-entities)
+- [Generic Entity References](#generic-entity-references)
 - [Sample Entity Class](#sample-entity-class)
 - [Placement of Files](#placement-of-files)
 
@@ -97,8 +98,8 @@ The following property level attributes should be added to entity class properti
 | `[CascadeUpdateRules]` | Applies to properties that reference other entities to specify if updates and create actions should be cascaded to the referenced entity. |
 | `[Description("Description of Property name")]` | Description of Class/Property Name. |
 | `[Encrypt]` | Add to properties that should be persisted in the database as an encrypted string. |
-| `[EntityDisplayName]` | Specifies the property that represents the entity's display name to users. If not explicitly defined, the framework defaults to using a property named 'Name,' if it exists. |
-| `[InverseProperty("ColumnName")]` | Specifies the name of the DB column on the other side of a one-to-many relationship. Add this attribute on any property listing entities that reference it. For example, if you have a `Customer` entity with a collection of `Orders`, you would use this attribute on the `Orders` property to specify the `Customer` property on the `Order` entity, e.g., `[InverseProperty("CustomerId")]`. |
+| `[EntityDisplayName]` | Specifies the property that represents the entity's display name to users. **MUST be applied to a `string` property only** — applying it to non-string types (e.g., `Guid`, `int`) will cause GraphQL `_displayName` resolution errors at runtime. If not explicitly defined, the framework defaults to using a property named 'Name,' if it exists. |
+| `[InverseProperty("ColumnName")]` | Specifies the name of the **DB column** (not the C# property name) on the other side of a one-to-many relationship. Add this attribute on any property listing entities that reference it. **CRITICAL: The value must be the database column name, which includes the `Id` suffix for FK columns.** For example, if you have a `Customer` entity with a collection of `Orders`, you would use `[InverseProperty(nameof(Order.Customer) + "Id")]` (resolves to `"CustomerId"`). Using the property name without `Id` (e.g., `"Customer"`) will cause NHibernate `Invalid column name` errors at runtime. |
 | `[NotMapped]` | Identifies properties that Shesha should not attempt to map to the database for read or write purposes. Add this attribute for calculated properties at the application level. |
 | `[ReadonlyProperty]` | Add this attribute to any properties that map to the database but should not be updated by the application layer such as calculated columns at the database level. |
 | `[ReferenceList("RefListName", optional moduleName)]` | Add this to `int` or `long` properties that are associated with a reference list. DO NOT add this attribute when the property returns an enum based reference list as it is redundant. |
@@ -249,6 +250,48 @@ public class NotificationMessageAttachment : FullAuditedEntity<Guid>
 }
 ```
 
+#### StoredFile and StoredFileVersion Entity Properties
+
+When querying files in domain services or writing migrations, you may need to reference properties on `StoredFile` and `StoredFileVersion`. The key properties are listed below.
+
+**`StoredFile` properties:**
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `Owner` | `GenericEntityReference` | The entity this file is attached to (OwnerType + OwnerId) |
+| `FileName` | `string` | Original file name including extension |
+| `FileType` | `string` | MIME type of the file |
+| `Category` | `string` | Optional category for grouping attachments on the same owner |
+| `Description` | `string` | Optional description |
+| `SortOrder` | `int` | Sort order within the owner's attachment list |
+| `ParentFile` | `StoredFile` | Reference to a parent file (for hierarchical file structures) |
+| `Folder` | `string` | Logical folder path for organization |
+| `IsVersionControlled` | `bool` | If `true`, uploading creates new versions instead of overwriting |
+| `Temporary` | `bool` | If `true`, the file is not yet bound to a persisted entity (see Temporary Files below) |
+| `TenantId` | `int?` | Tenant ID for multi-tenant isolation |
+
+**`StoredFileVersion` properties:**
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `File` | `StoredFile` | The parent `StoredFile` this version belongs to |
+| `VersionNo` | `int` | Sequential version number |
+| `FileSize` | `long` | Size of the file content in bytes |
+| `FileName` | `string` | File name for this specific version (may differ between versions) |
+| `FileType` | `string` | MIME type for this version |
+| `Description` | `string` | Optional version description |
+| `IsLast` | `bool` | `true` if this is the most recent version |
+| `IsSigned` | `bool` | `true` if this version has been digitally signed |
+
+#### Temporary Files and Delayed Binding
+
+When a user uploads files on a **create form** (before the entity has been saved and has an ID), the framework handles this automatically via the `Temporary` flag:
+
+1. **Upload phase**: Files uploaded before the entity is saved are created with `Temporary = true` and a temporary owner reference.
+2. **Entity save**: When the entity is persisted and receives its ID, the framework automatically binds the temporary files to the new entity — setting the correct `OwnerId`, `OwnerType`, and clearing the `Temporary` flag.
+
+This is a very common workflow (e.g. uploading attachments on a "New Application" form). **Do NOT** build custom solutions to handle pre-save file uploads — the framework's temporary file mechanism handles it out of the box.
+
 #### What NOT to Do
 
 - **Do NOT** create custom entities to store file metadata (file name, file size, file type, upload date, etc.) — `StoredFile` and `StoredFileVersion` already track all of this.
@@ -267,6 +310,113 @@ Custom file management should **only** be implemented if the framework's capabil
 - Bulk file import/export with custom transformation logic.
 
 Even in these cases, consider storing the resulting files back into `StoredFile` for consistency and UI integration.
+
+### Generic Entity References
+
+A `GenericEntityReference` is a special property type that allows an entity to reference **any other entity** without a fixed foreign key relationship. Use this when a property needs to point to different entity types depending on context.
+
+At the database level, a `GenericEntityReference` maps to **two or three columns**:
+
+| Column | Type | Description |
+|---|---|---|
+| `{Property}Id` | `nvarchar(100)` | The GUID of the referenced entity |
+| `{Property}ClassName` | `nvarchar(1000)` | The fully qualified class name of the referenced entity |
+| `{Property}DisplayName` | `nvarchar(1000)` | *(Optional)* Cached display name for quick UI rendering |
+
+The third column (`DisplayName`) is only added when you opt in via `[EntityReference(true)]`.
+
+#### When to Use
+
+Use `GenericEntityReference` when:
+- A property needs to reference **different entity types** (e.g., an audit log entry that can relate to any entity)
+- You want a **polymorphic association** without a separate FK for each target type
+
+Use a standard entity reference (FK) when:
+- The property always references the **same entity type**
+- You need **database-level referential integrity** (no FK constraints are created for generic references)
+
+#### Defining the Property
+
+```csharp
+using Shesha.Domain.Attributes;
+using Shesha.EntityReferences;
+
+public class AuditEntry : FullAuditedEntity<Guid>
+{
+    public virtual string Action { get; set; }
+
+    /// <summary>
+    /// The entity this audit entry relates to.
+    /// The 'true' parameter stores the display name for quick UI rendering.
+    /// </summary>
+    [EntityReference(true)]
+    public virtual GenericEntityReference RelatedEntity { get; set; }
+}
+```
+
+The `[EntityReference]` attribute accepts the following parameters:
+
+| Parameter | Type | Description |
+|---|---|---|
+| `storeDisplayName` | `bool` | When `true`, adds a `DisplayName` column. Default is `false`. |
+
+#### Working with GenericEntityReference in Code
+
+**Creating from an entity instance** (ID, class name, display name extracted automatically):
+
+```csharp
+var person = await _personRepository.GetAsync(personId);
+var auditEntry = new AuditEntry
+{
+    Action = "Reviewed",
+    RelatedEntity = new GenericEntityReference(person)
+};
+```
+
+**Creating manually** (when you don't have the entity loaded):
+
+```csharp
+var auditEntry = new AuditEntry
+{
+    RelatedEntity = new GenericEntityReference(
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        typeName: "Shesha.Core.Person",
+        displayName: "John Smith"
+    )
+};
+```
+
+**Reading properties:**
+
+```csharp
+string entityId = entry.RelatedEntity?.Id;                // "550e8400-..."
+string entityType = entry.RelatedEntity?._className;      // "Shesha.Core.Person"
+string displayText = entry.RelatedEntity?._displayName;   // "John Smith"
+```
+
+#### API Format
+
+When returned from an API, a `GenericEntityReference` is serialized as:
+
+```json
+{
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "_className": "Shesha.Core.Person",
+    "_displayName": "John Smith"
+}
+```
+
+When sending in API requests, include at least `id` and `_className`.
+
+#### Display Name Resolution
+
+When created from an entity instance, the framework resolves the display name by looking for (in priority order):
+1. A property decorated with `[EntityDisplayName]`
+2. A property named `Name`, `DisplayName`, `FullName`, `Address`, or `FullAddress`
+
+#### Database Migration
+
+See [DatabaseMigrations.md](DatabaseMigrations.md) § Adding Columns for GenericEntityReference.
 
 ### Sample Entity Class
 
@@ -346,6 +496,103 @@ namespace MyApp.AccountsPayable.Domain.PaymentBatches
 </example>
 
 This allows developers to control whether an application service should always be generated, follow the default configuration, or be explicitly disabled.
+
+## View-Backed (Flattened) Entities
+
+When you need a read-only entity that flattens data from multiple related tables (e.g., for list views or reporting), create a **view-backed entity** mapped to a SQL database view.
+
+### Key Rules for View-Backed Entities
+
+1. **Map to a view using `[Table]`** — Use `[Table("ModulePrefix_vw_ViewName")]` to map the entity to the database view instead of a table.
+2. **Mark all properties `[ReadonlyProperty]`** — Since views are read-only, every property must have `[ReadonlyProperty]`.
+3. **Use the same `Id` as the primary table** — The view must return the primary table's `Id` column as its `Id` so NHibernate can map records correctly.
+4. **Do NOT include `TenantId` in the view** — Not all Shesha tables have a `TenantId` column (it depends on whether multi-tenancy filtering is enabled for that table). Including `TenantId` in the view SELECT when the source table lacks it will cause `Invalid column name 'TenantId'` migration errors that **prevent the application from starting**. Only include audit columns (`CreationTime`, `CreatorUserId`, `LastModificationTime`, `LastModifierUserId`, `IsDeleted`, `DeletionTime`, `DeleterUserId`) that actually exist on the source table.
+5. **Use `CREATE OR ALTER VIEW`** — This makes the migration idempotent and safe to re-run.
+6. **Use nullable types for joined columns** — Since LEFT JOINs may produce NULL values, all flattened properties from joined tables should be nullable (e.g., `RefListStatus?`, `Guid?`).
+7. **Flattened FK columns use plain types** — For flattened FK entity references (like `Director` or `PartOf`), keep the entity reference property type and NHibernate will map using the `{Property}Id` column from the view. For scalar values from joined tables (like `Status`, `Outcome`), use the appropriate value type.
+
+### Entity Class Example
+
+```csharp
+using System;
+using System.ComponentModel.DataAnnotations.Schema;
+using Abp.Domain.Entities.Auditing;
+using Shesha.Domain.Attributes;
+
+namespace MyApp.Domain.Orders
+{
+    /// <summary>
+    /// Read-only flattened view of Order with Customer info.
+    /// </summary>
+    [Table("MyModule_vw_OrdersWithCustomerInfo")]
+    [Entity(GenerateApplicationService = GenerateApplicationServiceState.AlwaysGenerateApplicationService,
+        FriendlyName = "Order With Customer Info")]
+    public class OrderWithCustomerInfo : FullAuditedEntity<Guid>
+    {
+        // Order properties
+        [ReadonlyProperty]
+        public virtual string OrderNo { get; set; }
+
+        [ReadonlyProperty]
+        public virtual DateTime? OrderDate { get; set; }
+
+        // Flattened Customer properties
+        [ReadonlyProperty]
+        public virtual string CustomerName { get; set; }
+
+        [ReadonlyProperty]
+        public virtual string CustomerEmail { get; set; }
+    }
+}
+```
+
+### Database Migration Example
+
+```csharp
+[Migration(20250508101500)]
+public class M20250508101500 : OneWayMigration
+{
+    public override void Up()
+    {
+        Execute.Sql(@"
+CREATE OR ALTER VIEW [dbo].[MyModule_vw_OrdersWithCustomerInfo]
+AS
+SELECT
+    o.Id,
+    o.CreationTime,
+    o.CreatorUserId,
+    o.LastModificationTime,
+    o.LastModifierUserId,
+    o.IsDeleted,
+    o.DeletionTime,
+    o.DeleterUserId,
+    o.OrderNo,
+    o.OrderDate,
+
+    -- Flattened Customer columns
+    c.Name          AS CustomerName,
+    c.Email         AS CustomerEmail
+
+FROM [dbo].[MyModule_Orders] o
+LEFT JOIN [dbo].[Core_Accounts] c
+    ON c.Id = o.CustomerId;
+");
+    }
+}
+```
+
+### Column Naming in Views
+
+When flattening properties from joined tables, follow this naming convention in the view SELECT:
+
+| Source | View Column Alias | Entity Property |
+|--------|------------------|-----------------|
+| Reference list (e.g., `StatusLkp`) | `JoinedEntityStatusLkp` | `RefListStatus? JoinedEntityStatus` |
+| Outcome (e.g., `OutcomeLkp`) | `JoinedEntityOutcomeLkp` | `RefListOutcome? JoinedEntityOutcome` |
+| FK column (e.g., `SubjectId`) | `JoinedEntitySubjectId` | `Person JoinedEntitySubject` |
+| Scalar (e.g., `Id`) | `JoinedEntityId` | `Guid? JoinedEntityId` |
+
+NHibernate maps reference list properties to columns with `Lkp` suffix and FK properties to columns with `Id` suffix automatically. The view column aliases must match what NHibernate expects.
 
 ## Placement of Files
 - Aggregate roots should be placed within their own namespace and folder under the Domain folder.

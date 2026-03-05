@@ -48,7 +48,29 @@ powershell -ExecutionPolicy Bypass -File "<skill-base-dir>/scripts/Run-EndpointT
 
 Replace `<skill-base-dir>` with this skill's base directory and `<repo-root>` with the project's repository root (the working directory).
 
-Add `-StartServer` if `--start-server` was passed. This will first run `dotnet build` on the auto-detected solution, then start the server with `--no-build`.
+Add `-StartServer` if `--start-server` was passed.
+
+#### Server Startup (when `-StartServer` is used)
+
+The `Run-EndpointTests.ps1` script handles the full server lifecycle automatically:
+
+1. **Port detection** — reads `Properties/launchSettings.json` in the Web.Host project, preferring the `Project` profile. Falls back to port `21021`.
+2. **Ensure a `Project` launch profile exists** — before starting the server, verify `Properties/launchSettings.json` in the Web.Host project directory has a `Project` profile. If the file does not exist or lacks a `Project` profile, create/add one:
+   ```json
+   {
+     "profiles": {
+       "Project": {
+         "commandName": "Project",
+         "launchBrowser": false,
+         "applicationUrl": "http://localhost:21021"
+       }
+     }
+   }
+   ```
+3. **Build** — runs `dotnet build` on the auto-detected solution.
+4. **Start** — launches `dotnet run --launch-profile Project --no-build` with `-NoNewWindow` so server output is visible in the console for diagnosing startup errors.
+5. **Wait** — polls the session endpoint with a spinner (up to 300 seconds).
+6. **Cleanup** — stops the server process after tests complete.
 
 ### Step 3: Analyze Results
 

@@ -7,6 +7,7 @@
 - [Implementing Data-Based Reference Lists](#implementing-data-based-reference-lists)
 - [Data Migration Methods](#data-migration-methods)
 - [Multi-Value Reference Lists](#multi-value-reference-lists)
+- [Creating Data-Based Reference Lists via API](#creating-data-based-reference-lists-via-api) **(recommended)**
 - [Useful functions for working with Multi-value reference lists](#useful-functions-for-working-with-multi-value-reference-lists)
 
 A Reference List (sometimes referred to as Lookup values, or List of Values) refers to a standard list of values usually displayed to end-users as dropdown lists (e.g. **Titles**: Mr, Mrs, Miss, etc...; **Gender**: Male, Female; **Colour**: Red,Blue, etc...).
@@ -38,7 +39,7 @@ For reference lists that are not expected to change **ever**, for example, 'Days
 
 <example>
 ``` csharp
-[ReferenceList("MyOrg.MyProject", "Gender")]
+[ReferenceList("Gender")]
 public enum RefListGender: long
 {
     [Description("This is for a dude")]
@@ -152,7 +153,7 @@ To implement a Multi-value reference list:
 <example>
 
 ``` csharp
-[ReferenceList("MyOrg.MyProject", "DaysOfTheWeek")]
+[ReferenceList("DaysOfTheWeek")]
 [Flags]  // For multi-value ref list enums ensure the [Flags] attribute is added
 public enum RefListDaysOfTheWeek
 {
@@ -175,6 +176,164 @@ public RefListDaysOfTheWeek DaysOpen { get; set; }
 ```
 
 </example>
+
+## Creating Data-Based Reference Lists via API
+
+When the backend server is running, data-based reference lists can be created directly through the API instead of database migrations. This is the **preferred approach** as it avoids adding migration files for reference data and allows immediate verification.
+
+### Prerequisites
+
+- The backend server must be running (e.g., at `http://localhost:21021`)
+- You need a valid authentication token
+
+### Step 1: Authenticate
+
+```bash
+AUTH_RESULT=$(curl -s -X POST "http://localhost:21021/api/TokenAuth/Authenticate" \
+  -H "Content-Type: application/json" \
+  -d '{"userNameOrEmailAddress":"admin","password":"123qwe"}')
+TOKEN=$(echo "$AUTH_RESULT" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['accessToken'])")
+```
+
+### Step 2: Find the Module ID
+
+Look up an existing reference list in the same module to discover the module ID:
+
+```bash
+curl -s "http://localhost:21021/api/services/app/ReferenceList/GetByName?name=ExistingRefListName&module=MyModule.Name" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+From the response, get the `referenceList.id` of any item, then fetch the full reference list to find the `moduleId`:
+
+```bash
+curl -s "http://localhost:21021/api/services/app/ReferenceList/Get?id=<referenceListId>" \
+  -H "Authorization: Bearer $TOKEN"
+# Response includes: "moduleId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
+
+### Step 3: Create the Reference List
+
+```bash
+# POST /api/services/app/ReferenceList/Create
+curl -s -X POST "http://localhost:21021/api/services/app/ReferenceList/Create" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "moduleId": "<module-guid>",
+    "name": "MyRefListName",
+    "label": "My Ref List Label",
+    "description": "Description of the reference list"
+  }'
+# Response includes: "result": { "id": "<new-reflist-guid>", ... }
+```
+
+### Step 4: Create Reference List Items
+
+For each item in the reference list:
+
+```bash
+# POST /api/services/app/ReferenceListItem/Create
+curl -s -X POST "http://localhost:21021/api/services/app/ReferenceListItem/Create" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "referenceList": "<reflist-guid>",
+    "item": "Display Text",
+    "itemValue": 1,
+    "orderIndex": 1
+  }'
+```
+
+**For multi-value reference lists**, item values MUST be powers of two (1, 2, 4, 8, 16, 32, etc.).
+
+### Step 5: Set Status to Live
+
+After creating all items, mark the reference list as **Live** (status `3`):
+
+```bash
+# PUT /api/services/app/ConfigurationItem/UpdateStatus
+curl -s -X PUT "http://localhost:21021/api/services/app/ConfigurationItem/UpdateStatus" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filter": "{\"==\":[{\"var\":\"id\"},\"<reflist-guid>\"]}",
+    "status": 3
+  }'
+```
+
+**Status values:** 1 = Draft, 2 = Ready, 3 = Live, 4 = Retired, 5 = Cancelled
+
+### Complete Example: Creating a Reference List via API
+
+This example creates a "LoanPurposeType" reference list with multiple items:
+
+```bash
+# Authenticate
+AUTH_RESULT=$(curl -s -X POST "http://localhost:21021/api/TokenAuth/Authenticate" \
+  -H "Content-Type: application/json" \
+  -d '{"userNameOrEmailAddress":"admin","password":"123qwe"}')
+TOKEN=$(echo "$AUTH_RESULT" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['accessToken'])")
+MODULE_ID="<your-module-guid>"
+
+# Create the reference list
+RESULT=$(curl -s -X POST "http://localhost:21021/api/services/app/ReferenceList/Create" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"moduleId\":\"$MODULE_ID\",\"name\":\"LoanPurposeType\",\"label\":\"Loan Purpose Type\",\"description\":\"Loan purpose types\"}")
+LIST_ID=$(echo "$RESULT" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['id'])")
+echo "Created reference list: LoanPurposeType (ID: $LIST_ID)"
+
+# Helper function to create items
+create_item() {
+  local LIST_ID=$1 ITEM=$2 VALUE=$3 ORDER=$4
+  RESULT=$(curl -s -X POST "http://localhost:21021/api/services/app/ReferenceListItem/Create" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"referenceList\":\"$LIST_ID\",\"item\":\"$ITEM\",\"itemValue\":$VALUE,\"orderIndex\":$ORDER}")
+  SUCCESS=$(echo "$RESULT" | python3 -c "import json,sys; print(json.load(sys.stdin)['success'])")
+  echo "  Item: $ITEM (value=$VALUE) - $SUCCESS"
+}
+
+# Create items
+create_item "$LIST_ID" "Option One" 1 1
+create_item "$LIST_ID" "Option Two" 2 2
+create_item "$LIST_ID" "Option Three" 3 3
+
+# Set to Live
+curl -s -X PUT "http://localhost:21021/api/services/app/ConfigurationItem/UpdateStatus" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"filter\":\"{\\\"==\\\":[{\\\"var\\\":\\\"id\\\"},\\\"$LIST_ID\\\"]}\",\"status\":3}"
+echo "Status set to Live"
+```
+
+### Updating an Existing Reference List via API
+
+To add items to an existing reference list, first look it up by name:
+
+```bash
+# Find the reference list
+curl -s "http://localhost:21021/api/services/app/ReferenceList/GetByName?name=MyRefList&module=MyModule.Name" \
+  -H "Authorization: Bearer $TOKEN"
+# Extract the referenceList.id from any item in the response
+
+# Add new items using ReferenceListItem/Create (same as Step 4 above)
+```
+
+### Entity Property Pattern for Data-Based Reference Lists
+
+In the entity class, data-based reference list properties use `long?` with the `[ReferenceList]` attribute:
+
+```csharp
+// Single-value data-based reference list
+[ReferenceList("MyRefListName")]
+public virtual long? Category { get; set; }
+
+// Multi-value data-based reference list
+[MultiValueReferenceList("MyRefListName")]
+public virtual long? SelectedOptions { get; set; }
+```
 
 ## Useful functions for working with Multi-value reference lists
 If you include the `Shesha.Extensions` namespace you will have access to a couple of useful extension functions useful for working with multi-value reference lists.

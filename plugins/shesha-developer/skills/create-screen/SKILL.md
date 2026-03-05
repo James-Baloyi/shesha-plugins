@@ -38,7 +38,7 @@ src/app/(main)/dynamic/
 - **Screen registry** at `src/screens/index.tsx` tracks all screen definitions
 - Screens render at `{base_url}/dynamic/<route-path>`
 - The `(main)` layout group provides the app shell (sidebar, header)
-- Auth is handled via the `withAuth` HOC from `@/hocs` for authenticated screens
+- **Auth is handled by the `(main)` layout group** — there is NO `withAuth` HOC in Shesha applications. Pages under `src/app/(main)/` are automatically authenticated. Public screens go under `src/app/no-auth/`.
 
 ## Step-by-Step Instructions
 
@@ -144,35 +144,54 @@ export default ScreenNameComponent;
 
 Build out the component based on the user's description. You have access to:
 
-#### Shesha Providers and Hooks
+#### Shesha Application Hook (CRITICAL — read carefully)
+
+The primary Shesha hook is `useSheshaApplication` from `@shesha-io/reactjs`. It returns an `ISheshaApplicationInstance` with the following key properties:
+
 ```tsx
-import { useHttpClient } from '@/providers';      // HTTP client for API calls
-import { useAuth } from '@/providers';             // Current user info
-import { useGlobalState } from '@/providers';      // Global state
+import { useSheshaApplication } from '@shesha-io/reactjs';
+
+const { backendUrl, httpHeaders } = useSheshaApplication();
 ```
 
-#### UI Components (Ant Design)
-```tsx
-import { Button, Table, Card, Form, Input, Space, Typography, Row, Col, Spin, message } from 'antd';
-```
+**Available properties on `useSheshaApplication()`:**
+- `backendUrl: string` — The backend API base URL (e.g., `http://localhost:21021`)
+- `httpHeaders: Record<string, string>` — Auth headers (includes auth tokens automatically)
+- `applicationName?: string`
+- `applicationKey?: string`
+- `globalVariables: Record<string, any>`
+- `setGlobalVariables?: (values: Record<string, any>) => void`
+- `anyOfPermissionsGranted: (permissions: string[]) => boolean`
 
-#### Data Fetching Pattern
+**CRITICAL: There is NO `httpClient` property.** Do NOT destructure `httpClient` from `useSheshaApplication()` — it does not exist and will be `undefined`, causing a runtime `TypeError`.
+
+#### Data Fetching Pattern (CORRECT)
+
+Use the native `fetch` API with `backendUrl` and `httpHeaders` from `useSheshaApplication()`:
+
 ```tsx
-import { useHttpClient } from '@/providers';
-import { useEffect, useState } from 'react';
+"use client";
+
+import React, { useEffect, useState } from 'react';
+import { Spin, message } from 'antd';
+import { useSheshaApplication } from '@shesha-io/reactjs';
+import { IScreenProps } from '../interfaces';
 
 const MyScreen: React.FC<IScreenProps> = ({ title }) => {
-  const httpClient = useHttpClient();
+  const { backendUrl, httpHeaders } = useSheshaApplication();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    httpClient.get('/api/services/app/MyEntity/GetAll')
-      .then(response => setData(response.data.result))
+    fetch(`${backendUrl}/api/services/app/MyEntity/GetAll`, {
+      headers: { ...httpHeaders, 'Content-Type': 'application/json' },
+    })
+      .then((res) => res.json())
+      .then((json) => setData(json?.result))
       .catch(() => message.error('Failed to load data'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [backendUrl, httpHeaders]);
 
   return (
     <div style={{ padding: '24px' }}>
@@ -180,6 +199,26 @@ const MyScreen: React.FC<IScreenProps> = ({ title }) => {
     </div>
   );
 };
+
+export default MyScreen;
+```
+
+**WRONG — do NOT use these patterns:**
+```tsx
+// WRONG: httpClient does not exist on useSheshaApplication()
+const { httpClient } = useSheshaApplication();
+httpClient.get('/api/...'); // TypeError: Cannot read properties of undefined
+
+// WRONG: useHttpClient does not exist in @/providers
+import { useHttpClient } from '@/providers';
+
+// WRONG: useAuth does not exist in @/providers
+import { useAuth } from '@/providers';
+```
+
+#### UI Components (Ant Design)
+```tsx
+import { Button, Table, Card, Form, Input, Space, Typography, Row, Col, Spin, message } from 'antd';
 ```
 
 #### Styling
@@ -216,27 +255,24 @@ Create the Next.js page at `src/app/(main)/dynamic/<route-path>/page.tsx`.
 ```tsx
 "use client";
 
-import React from 'react';
-import { PageWithLayout } from '@/interfaces';
-import { withAuth } from '@/hocs';
+import React, { FC } from 'react';
 import ScreenNameComponent from '@/screens/<screen-name>';
 
-const Page: PageWithLayout = () => {
+const Page: FC = () => {
   return <ScreenNameComponent title="<Display Title>" />;
 };
 
-export default withAuth(Page);
+export default Page;
 ```
 
-**For public screens** (`isPublic: true`):
+**For public screens** (`isPublic: true`), place the route under `src/app/no-auth/` instead:
 ```tsx
 "use client";
 
-import React from 'react';
-import { PageWithLayout } from '@/interfaces';
+import React, { FC } from 'react';
 import ScreenNameComponent from '@/screens/<screen-name>';
 
-const Page: PageWithLayout = () => {
+const Page: FC = () => {
   return <ScreenNameComponent title="<Display Title>" />;
 };
 
@@ -245,9 +281,11 @@ export default Page;
 
 Key rules:
 - MUST include `"use client"` directive
-- MUST type the component as `PageWithLayout` (from `@/interfaces`)
-- MUST wrap with `withAuth` for authenticated screens (the default)
-- MUST NOT wrap with `withAuth` for public screens
+- MUST type the component as `FC` from React
+- Do NOT import `PageWithLayout` from `@/interfaces` — it does not exist in Shesha apps
+- Do NOT import `withAuth` from `@/hocs` — it does not exist in Shesha apps. Auth is handled by the `(main)` layout group automatically
+- Authenticated screens go under `src/app/(main)/dynamic/` — the `(main)` layout handles auth
+- Public screens go under `src/app/no-auth/`
 - More specific Next.js routes take precedence over the `[...path]` catch-all, so the custom screen renders instead of the Shesha form loader
 
 ### 7. Verify and Report
@@ -274,10 +312,14 @@ After creating all files:
 - ALWAYS validate for duplicates before writing any files
 - ALWAYS use kebab-case for screen directory names
 - ALWAYS use Ant Design for UI components — do not add other UI libraries
-- ALWAYS use `@/` import alias for Shesha source imports
-- ALWAYS wrap authenticated screens with `withAuth` from `@/hocs`
-- NEVER wrap public screens with `withAuth`
+- ALWAYS use `@/` import alias for project source imports
+- ALWAYS import Shesha hooks from `@shesha-io/reactjs` (e.g., `useSheshaApplication`)
+- NEVER import `useHttpClient`, `useAuth`, or `useGlobalState` from `@/providers` — these do not exist
+- NEVER destructure `httpClient` from `useSheshaApplication()` — it does not exist and will cause a runtime TypeError
+- NEVER import `withAuth` from `@/hocs` — it does not exist; auth is automatic via the `(main)` layout
+- NEVER import `PageWithLayout` from `@/interfaces` — it does not exist; use `FC` from React
 - NEVER use Shesha form designer JSON markup — build screens with plain React + Ant Design
-- If the screen needs entity data, use `useHttpClient()` to call Shesha REST APIs
+- For data fetching, use `fetch()` with `backendUrl` and `httpHeaders` from `useSheshaApplication()`
+- Include `backendUrl` and `httpHeaders` in `useEffect` dependency arrays for data fetching
 - Add reasonable loading states and error handling for async operations
 - Keep the route `page.tsx` thin — all component logic belongs in `src/screens/<screen-name>/index.tsx`

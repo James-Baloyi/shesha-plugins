@@ -21,7 +21,18 @@ Shesha uses Fluent Migrator for database migrations with additional Shesha-speci
 
 ### Migration ID Naming Convention
 
-The migration number must be unique across all migrations in the application and usually follows the format: `YYYYMMDDHHMMSS` (Year, Month, Day, Hour, Minute, Second). This ensures migrations are executed in the correct order.
+The migration number MUST use the **actual current UTC date and time** at the moment of generation, formatted as `YYYYMMDDHHmmss` (Year, Month, Day, Hour, Minute, Second). This ensures uniqueness and correct execution order.
+
+**CRITICAL**: Do NOT use placeholder, rounded, or invented timestamps (e.g., `20250302000000` or `20250302120000`). The hour, minute, and second components MUST reflect the real current UTC time. For example, if the current UTC time is `2025-03-02 14:37:52`, the migration ID must be `20250302143752`.
+
+When creating multiple migration files in the same session, increment the seconds by 1 for each subsequent migration to guarantee uniqueness (e.g., `20250302143752`, `20250302143753`, `20250302143754`).
+
+**To get the correct timestamp**, run the helper script before creating a migration:
+```bash
+bash scripts/migration-timestamp.sh       # current UTC time
+bash scripts/migration-timestamp.sh 1     # +1 second (for a second migration)
+```
+Or use an inline command: `date -u +"%Y%m%d%H%M%S"`
 
 ### Important Guidelines
 
@@ -81,6 +92,13 @@ Example: If AssemblyInfo.cs contains `[assembly: TablePrefix("LB_")]`, then:
 - Reference list property → Column name = [PropertyName]Lkp
 - TimeSpan property → Column name = [PropertyName]Ticks (Type: bigint)
 - Property added to inherited entity → Column name = [ModuleDBPrefix]_[PropertyName]
+- FK property added to inherited entity → Column name = [ModuleDBPrefix]_[PropertyName]Id
+- FK property in [JoinedProperty] table → Column name = [ModuleDBPrefix]_[PropertyName]Id (ALL columns in joined tables MUST be prefixed)
+
+**IMPORTANT: FK columns on inherited/joined tables:**
+When adding FK columns to an inherited entity's table (via `Alter.Table`) or to a `[JoinedProperty]` table (used by `ConfigurationItemBase` subclasses), the FK column name MUST include the module prefix. NHibernate expects ALL custom columns on these tables to use the prefix.
+- ✅ Correct: `.AddForeignKeyColumn("LB_RelatedEntityId", "Target_Table")`
+- ❌ Wrong: `.AddForeignKeyColumn("RelatedEntityId", "Target_Table")`
 
 **Module DB Prefix:**
 All tables/columns for a module must use its prefix (e.g., LB_, Core_, Frwk_)
@@ -180,25 +198,66 @@ if (!Schema.Table("MyModule_BaseEntities").Column(SheshaDatabaseConsts.Discrimin
 
 ## Adding Columns for GenericEntityReference
 
-When adding a GenericEntityReference property in an entity, you need to create three columns in the database migration:
+A `GenericEntityReference` property stores a polymorphic reference to any entity via two or three columns. Use the `AddGenericEntityReferenceColumns` Shesha extension method:
+
+### With display name (when entity uses `[EntityReference(true)]`):
+
+<example>
+
+```csharp
+// Adds: RelatedEntityId (nvarchar(100)), RelatedEntityClassName (nvarchar(1000)), RelatedEntityDisplayName (nvarchar(1000))
+Alter.Table("MyModule_AuditEntries")
+    .AddGenericEntityReferenceColumns("RelatedEntity", storeDisplayName: true);
+```
+
+</example>
+
+### Without display name (default):
+
+<example>
+
+```csharp
+// Adds: RelatedEntityId (nvarchar(100)), RelatedEntityClassName (nvarchar(1000))
+Alter.Table("MyModule_AuditEntries")
+    .AddGenericEntityReferenceColumns("RelatedEntity");
+```
+
+</example>
+
+### Manual column creation (if you prefer explicit control):
 
 <example>
 
 ```csharp
 Alter.Table("MyModule_Entities")
-    .AddColumn("HasMemberId").AsString().Nullable()
-    .AddColumn("HasMemberClassName").AsString().Nullable()
-    .AddColumn("HasMemberDisplayName").AsString().Nullable();
+    .AddColumn("HasMemberId").AsString(100).Nullable()
+    .AddColumn("HasMemberClassName").AsString(1000).Nullable()
+    .AddColumn("HasMemberDisplayName").AsString(1000).Nullable();  // Optional — only if [EntityReference(true)]
 ```
 
 </example>
 
-These three columns work together to store:
-1. The ID of the referenced entity
-2. The class/type name of the referenced entity
-3. A display name for the referenced entity
+### On a new table:
 
-This allows for polymorphic references where a property can point to entities of different types.
+<example>
+
+```csharp
+Create.Table("MyModule_AuditEntries")
+    .WithIdAsGuid()
+    .WithFullAuditColumns()
+    .WithColumn("Action").AsString(100).Nullable()
+    .WithColumn("Description").AsString(2000).Nullable();
+
+Alter.Table("MyModule_AuditEntries")
+    .AddGenericEntityReferenceColumns("RelatedEntity", storeDisplayName: true);
+```
+
+</example>
+
+The columns work together to store:
+1. `{Property}Id` — The ID of the referenced entity
+2. `{Property}ClassName` — The fully qualified class name of the referenced entity
+3. `{Property}DisplayName` — *(Optional)* Cached display name for UI rendering
 
 ## Adding Foreign Key Columns
 
@@ -279,6 +338,60 @@ namespace MyModule.Migrations
 ```
 
 </example>
+
+## Creating Database Views
+
+When creating view-backed (flattened) entities, use `Execute.Sql` with `CREATE OR ALTER VIEW` to create the database view:
+
+<example>
+
+```csharp
+[Migration(20250508101500)]
+public class M20250508101500 : OneWayMigration
+{
+    public override void Up()
+    {
+        Execute.Sql(@"
+CREATE OR ALTER VIEW [dbo].[MyModule_vw_OrdersWithCustomerInfo]
+AS
+SELECT
+    o.Id,
+    o.CreationTime,
+    o.CreatorUserId,
+    o.LastModificationTime,
+    o.LastModifierUserId,
+    o.IsDeleted,
+    o.DeletionTime,
+    o.DeleterUserId,
+    o.OrderNo,
+    o.OrderDate,
+    o.CustomerId,
+
+    -- Flattened columns from joined tables
+    c.Name          AS CustomerName,
+    c.StatusLkp     AS CustomerStatusLkp
+
+FROM [dbo].[MyModule_Orders] o
+LEFT JOIN [dbo].[Core_Accounts] c
+    ON c.Id = o.CustomerId;
+");
+    }
+}
+```
+
+</example>
+
+### Important Rules for View Migrations
+
+1. **Use `CREATE OR ALTER VIEW`** — This makes the migration idempotent. If the view already exists it will be updated, avoiding errors on re-run.
+2. **Use `LEFT JOIN`** — Always use LEFT JOIN for joined tables so rows from the primary table are not excluded when the joined record is NULL.
+3. **Alias flattened columns correctly** — NHibernate expects specific column name suffixes:
+   - Reference list properties → `{Alias}Lkp` suffix (e.g., `CustomerStatusLkp`)
+   - FK properties → `{Alias}Id` suffix (e.g., `CustomerId`)
+   - Scalar values → no suffix (e.g., `CustomerName`)
+4. **Do NOT include `TenantId`** — Not all Shesha tables have a `TenantId` column. Including it when the source table lacks it causes `Invalid column name 'TenantId'` errors that **prevent the application from starting**. Only include columns that actually exist on the source tables.
+5. **Include audit columns from the primary table only** — Include `CreationTime`, `CreatorUserId`, `LastModificationTime`, `LastModifierUserId`, `IsDeleted`, `DeletionTime`, `DeleterUserId` from the primary (base) table.
+6. **View naming convention** — Use `[ModuleDBPrefix]_vw_[PluralizedEntityName]` (e.g., `LB_vw_OrdersWithCustomerInfo`).
 
 ## Custom SQL Queries
 
